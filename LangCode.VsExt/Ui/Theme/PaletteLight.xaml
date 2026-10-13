@@ -1,0 +1,229 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ 
+    <!-- ==================== 背景层次（白 / #F6F7F9 / #EEF1F4） ==================== -->
+    <SolidColorBrush x:Key="Ap.Bg"
+                     Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="Ap.BgElevated"
+                     Color="#FFF6F7F9"/>
+    <SolidColorBrush x:Key="Ap.BgInput"
+                     Color="#FFEEF1F4"/>
+    <SolidColorBrush x:Key="Ap.BgCard"
+                     Color="#FFF6F7F9"/>
+    <SolidColorBrush x:Key="Ap.BgHover"
+                     Color="#0F000000"/>
+    <SolidColorBrush x:Key="Ap.BgActive"
+                     Color="#14000000"/>
+    <SolidColorBrush x:Key="Ap.FooterBg"
+                     Color="#FFF1F3F6"/>
+    <SolidColorBrush x:Key="Ap.PanelBg"
+                     Color="#FFF1F3F6"/>
+
+    <!-- ==================== 描边 / 分隔线（#EAEDF0 / #DDE1E6） ==================== -->
+    <SolidColorBrush x:Key="Ap.Border"
+                     Color="#FFEAEDF0"/>
+    <SolidColorBrush x:Key="Ap.BorderSoft"
+                     Color="#FFEAEDF0"/>
+    <SolidColorBrush x:Key="Ap.DividerSoft"
+                     Color="#FFEAEDF0"/>
+    <SolidColorBrush x:Key="Ap.Divider"
+                     Color="#FFEAEDF0"/>
+    <SolidColorBrush x:Key="Ap.ToolBorder"
+                     Color="#FFEAEDF0"/>
+    <SolidColorBrush x:Key="Ap.InputBorder"
+                     Color="#FFDDE1E6"/>
+    <SolidColorBrush x:Key="Ap.ControlBorder"
+                     Color="#FFDDE1E6"/>
+    <SolidColorBrush x:Key="Ap.ActBorder"
+                     Color="#FFDDE1E6"/>
+    <SolidColorBrush x:Key="Ap.PopoverBorder"
+                     Color="#FFDDE1E6"/>
+    <SolidColorBrush x:Key="Ap.PopoverDivider"
+                     Color="#FFEAEDF0"/>
+    <SolidColorBrush x:Key="Ap.ControlBg"
+                     Color="#FFEEF1F4"/>
+    <SolidColorBrush x:Key="Ap.PopoverBg"
+                     Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="Ap.ToolHeadBg"
+                     Color="#FFF1F3F6"/>
+    <SolidColorBrush x:Key="Ap.ToolHeadHover"
+                     Color="#FFE9ECF0"/>
+    <SolidColorBrush x:Key="Ap.TrackBg"
+                     Color="#FFDDE1E6"/>
+    <SolidColorBrush x:Key="Ap.FreeSwatch"
+                     Color="#FFA8AEB8"/>
+    <SolidColorBrush x:Key="Ap.DisabledBg"
+                     Color="#FFDDE1E6"/>
+
+    <!-- ==================== 文本层次（#1C2024 / #5C646F / #8D949E） ==================== -->
+    <SolidColorBrush x:Key="Ap.Fg"
+                     Color="#FF5C646F"/>
+    <SolidColorBrush x:Key="Ap.FgBright"
+                     Color="#FF1C2024"/>
+    <SolidColorBrush x:Key="Ap.FgDim"
+                     Color="#FF7A828C"/>
+    <SolidColorBrush x:Key="Ap.FgFaint"
+                     Color="#FF8D949E"/>
+    <SolidColorBrush x:Key="Ap.FgBody"
+                     Color="#FF5C646F"/>
+    <SolidColorBrush x:Key="Ap.FgLabel"
+                     Color="#FF5C646F"/>
+    <SolidColorBrush x:Key="Ap.FgStrong"
+                     Color="#FF1C2024"/>
+    <SolidColorBrush x:Key="Ap.FgMenu"
+                     Color="#FF5C646F"/>
+    <SolidColorBrush x:Key="Ap.IconMuted"
+                     Color="#FF8D949E"/>
+    <SolidColorBrush x:Key="Ap.IconDim"
+                     Color="#FF8D949E"/>
+    <SolidColorBrush x:Key="Ap.IconFaint"
+                     Color="#FF8D949E"/>
+    <SolidColorBrush x:Key="Ap.White"
+                     Color="#FFFFFFFF"/>
+
+    <!-- ==================== 强调色与语义色 ==================== -->
+    <!-- 主色：蓝 #2F6FED（悬停态由 AccentHi #2A63D8 提到 Accent） -->
+    <SolidColorBrush x:Key="Ap.Accent"
+                     Color="#FF2F6FED"/>
+    <SolidColorBrush x:Key="Ap.AccentHi"
+                     Color="#FF2A63D8"/>
+    <!-- 兼容键位：原青色语义（完成/已批准/差异新增）统一映射到主色 -->
+    <SolidColorBrush x:Key="Ap.Teal"
+                     Color="#FF2F6FED"/>
+    <SolidColorBrush x:Key="Ap.TealText"
+                     Color="#FF2A63D8"/>
+    <!-- 危险：低饱和红 #C0564F -->
+    <SolidColorBrush x:Key="Ap.Red"
+                     Color="#FFC0564F"/>
+    <SolidColorBrush x:Key="Ap.RedText"
+                     Color="#FFA8443E"/>
+    <SolidColorBrush x:Key="Ap.FocusBorder"
+                     Color="#FF2F6FED"/>
+
+    <!--
+        审批（暖色提示）：与 Palette.xaml（深色）一一对应，对齐 UIUX 模板的「统一审批区 .appr」
+        浅色下用更深的琥珀保证在暖白底上的对比度
+    -->
+    <SolidColorBrush x:Key="Ap.Warn"
+                     Color="#FF9A7B1F"/>
+    <SolidColorBrush x:Key="Ap.WarnText"
+                     Color="#FF8A6D1A"/>
+    <SolidColorBrush x:Key="Ap.WarnSoft"
+                     Color="#1AD6B45E"/>
+    <SolidColorBrush x:Key="Ap.WarnBorder"
+                     Color="#59B8901F"/>
+    <SolidColorBrush x:Key="Ap.WarnPanelBg"
+                     Color="#FFFFFBF0"/>
+    <SolidColorBrush x:Key="Ap.WarnPanelBorder"
+                     Color="#FFEADFC2"/>
+
+    <!-- 语义淡底 / 淡描边 -->
+    <SolidColorBrush x:Key="Ap.TealSoft"
+                     Color="#1A2F6FED"/>
+    <SolidColorBrush x:Key="Ap.TealSoftWeak"
+                     Color="#122F6FED"/>
+    <SolidColorBrush x:Key="Ap.TealBorder"
+                     Color="#612F6FED"/>
+    <SolidColorBrush x:Key="Ap.TealBorderSoft"
+                     Color="#4D2F6FED"/>
+    <SolidColorBrush x:Key="Ap.RedSoft"
+                     Color="#1AC0564F"/>
+    <SolidColorBrush x:Key="Ap.RedBorderSoft"
+                     Color="#57C0564F"/>
+    <SolidColorBrush x:Key="Ap.AccentSoft"
+                     Color="#1A2F6FED"/>
+    <SolidColorBrush x:Key="Ap.AccentSoftWeak"
+                     Color="#122F6FED"/>
+    <SolidColorBrush x:Key="Ap.AccentBorder"
+                     Color="#612F6FED"/>
+
+    <!-- 完成提示条（中性：淡底 + 灰描边 + 灰文字） -->
+    <SolidColorBrush x:Key="Ap.DoneBg"
+                     Color="#0F000000"/>
+    <SolidColorBrush x:Key="Ap.DoneBorder"
+                     Color="#478D949E"/>
+    <SolidColorBrush x:Key="Ap.DoneFg"
+                     Color="#FF5C646F"/>
+
+    <!-- 批注提示 -->
+    <SolidColorBrush x:Key="Ap.NoteFg"
+                     Color="#FF23539E"/>
+    <SolidColorBrush x:Key="Ap.NoteBorder"
+                     Color="#402F6FED"/>
+
+    <!-- 用户气泡 -->
+    <SolidColorBrush x:Key="Ap.UserBubble"
+                     Color="#FFEEF1F4"/>
+    <SolidColorBrush x:Key="Ap.UserBubbleBorder"
+                     Color="#FFDDE1E6"/>
+
+    <!-- 头像 / 品牌块 -->
+    <SolidColorBrush x:Key="Ap.AvatarBg"
+                     Color="#0D000000"/>
+    <SolidColorBrush x:Key="Ap.AvatarFg"
+                     Color="#FF5C646F"/>
+
+    <!-- ==================== 代码语法高亮（VS Light 同款） ==================== -->
+    <SolidColorBrush x:Key="Ap.SynKey"
+                     Color="#FF0000FF"/>
+    <SolidColorBrush x:Key="Ap.SynStr"
+                     Color="#FFA31515"/>
+    <SolidColorBrush x:Key="Ap.SynComment"
+                     Color="#FF008000"/>
+    <SolidColorBrush x:Key="Ap.SynFunc"
+                     Color="#FF795E26"/>
+    <SolidColorBrush x:Key="Ap.SynType"
+                     Color="#FF267F99"/>
+    <SolidColorBrush x:Key="Ap.SynAttr"
+                     Color="#FF001080"/>
+    <SolidColorBrush x:Key="Ap.SynNum"
+                     Color="#FF098658"/>
+    <SolidColorBrush x:Key="Ap.SynPlain"
+                     Color="#FF000000"/>
+    <SolidColorBrush x:Key="Ap.CodeFg"
+                     Color="#FF001080"/>
+    <SolidColorBrush x:Key="Ap.InlineCodeFg"
+                     Color="#FFA31515"/>
+    <SolidColorBrush x:Key="Ap.InlineCodeBg"
+                     Color="#12000000"/>
+
+    <!-- diff 行底色 / 文字：新增=主色淡底，删除=低饱和红淡底 + 删除线 -->
+    <SolidColorBrush x:Key="Ap.DiffAddBg"
+                     Color="#1F2F6FED"/>
+    <SolidColorBrush x:Key="Ap.DiffAddFg"
+                     Color="#FF1A3F8A"/>
+    <SolidColorBrush x:Key="Ap.DiffDelBg"
+                     Color="#1AC0564F"/>
+    <SolidColorBrush x:Key="Ap.DiffDelFg"
+                     Color="#FF8A3B36"/>
+    <SolidColorBrush x:Key="Ap.DiffCtxFg"
+                     Color="#FF5C646F"/>
+    <SolidColorBrush x:Key="Ap.DiffSignFg"
+                     Color="#52000000"/>
+
+    <!-- ==================== 控件补充色（与 Palette.xaml 一一对应） ==================== -->
+    <SolidColorBrush x:Key="Ap.SwitchOff"
+                     Color="#FFC6CBD1"/>
+    <SolidColorBrush x:Key="Ap.ScrollThumb"
+                     Color="#59808A96"/>
+    <SolidColorBrush x:Key="Ap.ScrollThumbHover"
+                     Color="#99808A96"/>
+    <SolidColorBrush x:Key="Ap.ComboItemHover"
+                     Color="#FFF0F2F5"/>
+    <SolidColorBrush x:Key="Ap.ComboItemSelected"
+                     Color="#1F2F6FED"/>
+
+    <!-- ==================== 圆角档位（与主题无关，两套一致） ==================== -->
+    <CornerRadius x:Key="Ap.RadiusSm">3</CornerRadius>
+    <CornerRadius x:Key="Ap.RadiusXs">4</CornerRadius>
+    <CornerRadius x:Key="Ap.RadiusChip">5</CornerRadius>
+    <CornerRadius x:Key="Ap.RadiusCard">7</CornerRadius>
+    <CornerRadius x:Key="Ap.RadiusMd">6</CornerRadius>
+    <CornerRadius x:Key="Ap.RadiusLg">8</CornerRadius>
+    <CornerRadius x:Key="Ap.RadiusXl">10</CornerRadius>
+
+    <!-- ==================== 字体（与主题无关，两套一致） ==================== -->
+    <FontFamily x:Key="Ap.FontUi">Microsoft YaHei UI, Segoe UI, Segoe UI Emoji</FontFamily>
+    <FontFamily x:Key="Ap.FontCode">Cascadia Mono, Consolas, Courier New</FontFamily>
+
+</ResourceDictionary>

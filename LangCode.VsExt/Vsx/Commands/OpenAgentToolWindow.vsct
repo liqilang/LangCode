@@ -1,0 +1,80 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+  <Commands package="guidLangCodePackage">
+    <Groups>
+      <Group guid="guidLangCodeCmdSet" id="LangCodeMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS" />
+      </Group>
+      <Group guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN" />
+      </Group>
+    </Groups>
+    <Buttons>
+      <Button guid="guidLangCodeCmdSet" id="OpenAgentToolWindowCommandId" priority="0x0100" type="Button">
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeMenuGroup" />
+        <Strings>
+          <ButtonText>Open LangCode Assistant</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidLangCodeCmdSet" id="ExplainSelectionCommandId" priority="0x0100" type="Button">
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Strings>
+          <ButtonText>LangCode: Explain Selection</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidLangCodeCmdSet" id="RefactorSelectionCommandId" priority="0x0110" type="Button">
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Strings>
+          <ButtonText>LangCode: Refactor Selection</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidLangCodeCmdSet" id="GenerateTestsCommandId" priority="0x0120" type="Button">
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Strings>
+          <ButtonText>LangCode: Generate Tests</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidLangCodeCmdSet" id="GenerateDocsCommandId" priority="0x0130" type="Button">
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Strings>
+          <ButtonText>LangCode: Generate Docs</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidLangCodeCmdSet" id="FixSelectionCommandId" priority="0x0140" type="Button">
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Strings>
+          <ButtonText>LangCode: Fix Selection</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidLangCodeCmdSet" id="InlineEditCommandId" priority="0x0150" type="Button">
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Strings>
+          <ButtonText>LangCode: Inline Edit (Ctrl+K)</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+  <!--
+    KeyBindings 是 CommandTable 的**顶层**节（与 Commands / Symbols 平级），
+    不能嵌在 <Commands> 里，否则 VSCT 报：VSCT1102: Unknown Subsection: 'KeyBindings'
+  -->
+  <KeyBindings>
+    <KeyBinding guid="guidLangCodeCmdSet" id="InlineEditCommandId" editor="guidVSStd97" key1="K" mod1="Control" />
+  </KeyBindings>
+  <Symbols>
+    <GuidSymbol name="guidLangCodePackage" value="{2F3A9C14-6B7D-4E58-9A10-1B2C3D4E5F60}" />
+    <GuidSymbol name="guidLangCodeCmdSet" value="{7C4E1D82-3F5A-4B69-8C7D-9E0F1A2B3C4D}">
+      <IDSymbol name="LangCodeMenuGroup" value="0x1020" />
+      <IDSymbol name="LangCodeCodeWinGroup" value="0x1021" />
+      <IDSymbol name="OpenAgentToolWindowCommandId" value="0x0100" />
+      <IDSymbol name="ExplainSelectionCommandId" value="0x0101" />
+      <IDSymbol name="RefactorSelectionCommandId" value="0x0102" />
+      <IDSymbol name="GenerateTestsCommandId" value="0x0103" />
+      <IDSymbol name="GenerateDocsCommandId" value="0x0104" />
+      <IDSymbol name="FixSelectionCommandId" value="0x0105" />
+      <IDSymbol name="InlineEditCommandId" value="0x0110" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>
