@@ -1,0 +1,65 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LangCode（Visual Studio 远程 UI 扩展）—— 仓库卫生规则
+#
+# 约定：只提交“源文件 + 清单 + 文档”。以下内容一律不入库：
+#   · 各工程的 bin/ 与 obj/（含 NuGet 还原产物、VSIX 打包中间件）
+#   · VS 的用户级产物（.vs/、*.user）
+#   · 运行时/调试产物（XamlGuard 生成的 XAML dump、日志）
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 构建产物
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Dd]ebug/
+[Rr]elease/
+[Dd]rop/
+
+# Visual Studio / VSIX
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.vsix
+*.vsixmanifest.bak
+
+# 本仓库特有的历史遗留产物名（工程曾命名为 F.VsExt）
+F.VsExt.*
+
+# 调试 / 诊断产物（由 tools/XamlGuard 生成，可随时重建）
+artifacts/
+
+# NuGet
+*.nupkg
+packages/
+project.lock.json
+.project.assets.json
+
+# 测试与覆盖率
+[Tt]est[Rr]esult*/
+*.coverage
+*.coverlet.json
+
+# 系统垃圾
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# 运行时用户数据（理论上不在仓库内，这里兜底防止误提交）
+conversations.json
+roo-state.json
+settings.json
+audit.log
+audit.log.1
+usage.json
+modes.json
+
+# 检查点影子仓库（%APPDATA% 下，仍兜底）
+checkpoints/
+
+# 编辑器 / 工具留下的备份
+*.bak
+*.langcode.tmp
+/.roo
