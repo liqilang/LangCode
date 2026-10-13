@@ -75,10 +75,33 @@ namespace LangCode.Persistence
         [DataMember(Name = "updatedUtc", Order = 5)]
         public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
 
-        [DataMember(Name = "messages", Order = 6)]
+        /// <summary>
+        /// 消息条数。索引文件里只保留元数据（<see cref="Messages"/> 为空），
+        /// 历史列表要靠它显示「N 条消息」，因此单独存一份，避免为了数条数去读每个会话文件
+        /// </summary>
+        [DataMember(Name = "messageCount", Order = 6)]
+        public int MessageCount { get; set; }
+
+        [DataMember(Name = "messages", Order = 7)]
         public List<StoredMessage> Messages { get; set; } = [];
     }
 
+    /// <summary>
+    /// 会话索引文件（<c>conversations/index.json</c>）：只存元数据，供历史列表快速加载
+    /// </summary>
+    [DataContract(Name = "conversationIndex")]
+    internal sealed class ConversationIndex
+    {
+        [DataMember(Name = "version", Order = 1)]
+        public int Version { get; set; } = 2;
+
+        [DataMember(Name = "conversations", Order = 2)]
+        public List<StoredConversation> Conversations { get; set; } = [];
+    }
+
+    /// <summary>
+    /// 旧版单文件格式（<c>conversations.json</c>）：仅用于一次性迁移
+    /// </summary>
     [DataContract(Name = "conversationFile")]
     internal sealed class ConversationFile
     {
@@ -90,77 +113,238 @@ namespace LangCode.Persistence
     }
 
     /// <summary>
-    /// 会话持久化（<c>%APPDATA%\LangCode\conversations.json</c>）
-    /// 读失败回退空表，写失败静默（不阻断对话）
+    /// 会话持久化。每个会话单独落一个文件（<c>%APPDATA%\LangCode\vsext\conversations\{id}.json</c>），
+    /// 另有一份索引（<c>index.json</c>）只存元数据。
+    /// <para>
+    /// 相比旧的「所有会话挤在一个 conversations.json」：保存单个会话不再全量重写整份文件，
+    /// 历史列表也只读索引（不解析每条会话的全部消息），会话越多优势越明显。
+    /// 旧文件会在首次访问时自动迁移到新结构（原文件改名 <c>.migrated</c> 备份）。
+    /// </para>
+    /// 读失败回退空表，写失败静默（不阻断对话）。
     /// </summary>
     public static class ConversationStore
     {
         private static readonly object Gate = new object();
 
-        public static string FilePath => Path.Combine(SettingsStore.Directory, "conversations.json");
+        /// <summary>索引文件名（不会与会话 id 冲突：id 是 32 位十六进制 guid）</summary>
+        private const string IndexFileName = "index.json";
 
+        /// <summary>会话文件目录</summary>
+        public static string Directory => Path.Combine(SettingsStore.Directory, "conversations");
+
+        private static string IndexPath => Path.Combine(Directory, IndexFileName);
+
+        /// <summary>旧版单文件路径（迁移来源）</summary>
+        private static string LegacyFilePath => Path.Combine(SettingsStore.Directory, "conversations.json");
+
+        private static bool _migrated;
+
+        // ==================== 对外 API ====================
+
+        /// <summary>
+        /// 读取全部会话（含消息）。会触发一次性迁移。
+        /// </summary>
         public static List<StoredConversation> LoadAll()
         {
             lock (Gate)
             {
+                EnsureMigratedLocked();
+
+                var result = new List<StoredConversation>();
                 try
                 {
-                    if (!File.Exists(FilePath))
+                    if (!System.IO.Directory.Exists(Directory))
                     {
-                        return [];
+                        return result;
                     }
 
-                    var json = File.ReadAllText(FilePath, Encoding.UTF8);
-                    var serializer = new DataContractJsonSerializer(typeof(ConversationFile));
-                    using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(json)))
+                    foreach (var file in System.IO.Directory.GetFiles(Directory, "*.json", SearchOption.TopDirectoryOnly))
                     {
-                        var file = serializer.ReadObject(stream) as ConversationFile;
-                        return file?.Conversations ?? [];
+                        if (string.Equals(Path.GetFileName(file), IndexFileName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        try
+                        {
+                            var conversation = Deserialize<StoredConversation>(File.ReadAllText(file, Encoding.UTF8));
+                            if (conversation != null)
+                            {
+                                result.Add(conversation);
+                            }
+                        }
+                        catch (Exception)
+                        {
+                            // 单个文件损坏：跳过，不影响其余会话
+                        }
                     }
                 }
                 catch (Exception)
                 {
-                    return [];
+                    return result;
+                }
+
+                return result;
+            }
+        }
+
+        /// <summary>
+        /// 只读索引：返回全部会话的元数据（<see cref="StoredConversation.Messages"/> 为空）
+        /// —— 历史列表用它，不必解析每条会话的完整消息
+        /// </summary>
+        public static List<StoredConversation> LoadSummaries()
+        {
+            lock (Gate)
+            {
+                EnsureMigratedLocked();
+                return ReadIndexLocked();
+            }
+        }
+
+        /// <summary>
+        /// 按 id 读单个会话（含消息）；不存在返回 null
+        /// </summary>
+        public static StoredConversation LoadConversationById(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return null;
+            }
+
+            lock (Gate)
+            {
+                EnsureMigratedLocked();
+
+                try
+                {
+                    var path = PathFor(id);
+                    if (!File.Exists(path))
+                    {
+                        return null;
+                    }
+
+                    return Deserialize<StoredConversation>(File.ReadAllText(path, Encoding.UTF8));
+                }
+                catch (Exception)
+                {
+                    return null;
                 }
             }
         }
 
-        public static void SaveAll(IEnumerable<StoredConversation> conversations)
+        /// <summary>
+        /// 保存单个会话：写会话文件 + 更新索引；索引超过 <paramref name="maxItems"/> 时
+        /// 顺带删掉最旧的多余会话文件（0 / 负数表示不限制）
+        /// </summary>
+        public static void SaveConversation(StoredConversation conversation, int maxItems = 0)
+        {
+            if (conversation == null || string.IsNullOrWhiteSpace(conversation.Id))
+            {
+                return;
+            }
+
+            lock (Gate)
+            {
+                EnsureMigratedLocked();
+                SaveConversationLocked(conversation, maxItems);
+            }
+        }
+
+        /// <summary>
+        /// 批量保存（迁移 / 兼容旧调用）：逐个写文件并重建索引
+        /// </summary>
+        public static void SaveAll(IEnumerable<StoredConversation> conversations, int maxItems = 0)
+        {
+            var list = (conversations ?? Enumerable.Empty<StoredConversation>()).ToList();
+
+            lock (Gate)
+            {
+                EnsureMigratedLocked();
+
+                foreach (var conversation in list)
+                {
+                    if (conversation == null || string.IsNullOrWhiteSpace(conversation.Id))
+                    {
+                        continue;
+                    }
+
+                    WriteConversationFileLocked(conversation);
+                }
+
+                var entries = list
+                    .Where(c => c != null && !string.IsNullOrWhiteSpace(c.Id))
+                    .Select(ToIndexEntry)
+                    .OrderByDescending(c => c.UpdatedUtc)
+                    .ToList();
+
+                if (maxItems > 0 && entries.Count > maxItems)
+                {
+                    var removed = entries.Skip(maxItems).ToList();
+                    entries = entries.Take(maxItems).ToList();
+                    foreach (var stale in removed)
+                    {
+                        TryDeleteConversationFileLocked(stale.Id);
+                    }
+                }
+
+                WriteIndexLocked(entries);
+            }
+        }
+
+        /// <summary>
+        /// 删除单个会话（文件 + 索引条目）
+        /// </summary>
+        public static void DeleteConversation(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return;
+            }
+
+            lock (Gate)
+            {
+                EnsureMigratedLocked();
+
+                TryDeleteConversationFileLocked(id);
+
+                var index = ReadIndexLocked();
+                index.RemoveAll(c => string.Equals(c.Id, id, StringComparison.OrdinalIgnoreCase));
+                WriteIndexLocked(index);
+            }
+        }
+
+        /// <summary>
+        /// 清空全部会话（删掉所有会话文件与索引）
+        /// </summary>
+        public static void ClearAll()
         {
             lock (Gate)
             {
+                EnsureMigratedLocked();
+
                 try
                 {
-                    System.IO.Directory.CreateDirectory(SettingsStore.Directory);
-
-                    var payload = new ConversationFile
+                    if (System.IO.Directory.Exists(Directory))
                     {
-                        Conversations = [.. conversations ?? Enumerable.Empty<StoredConversation>()],
-                    };
-
-                    var serializer = new DataContractJsonSerializer(typeof(ConversationFile));
-                    var buffer = new MemoryStream();
-                    using (var writer = JsonReaderWriterFactory.CreateJsonWriter(buffer, Encoding.UTF8, ownsStream: false, indent: true))
-                    {
-                        serializer.WriteObject(writer, payload);
-                        writer.Flush();
+                        foreach (var file in System.IO.Directory.GetFiles(Directory, "*.json", SearchOption.TopDirectoryOnly))
+                        {
+                            try
+                            {
+                                File.Delete(file);
+                            }
+                            catch (Exception)
+                            {
+                                // 单个删不掉就算了，继续删其余
+                            }
+                        }
                     }
-
-                    var json = Encoding.UTF8.GetString(buffer.ToArray());
-                    var temp = FilePath + ".tmp";
-                    File.WriteAllText(temp, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-
-                    if (File.Exists(FilePath))
-                    {
-                        File.Delete(FilePath);
-                    }
-
-                    File.Move(temp, FilePath);
                 }
                 catch (Exception)
                 {
-                    // 落盘失败不影响当前会话继续
+                    // 目录不可写等：忽略
                 }
+
+                WriteIndexLocked([]);
             }
         }
 
@@ -179,6 +363,7 @@ namespace LangCode.Persistence
                 Preview = BuildPreview(firstUser?.Text),
                 Model = model ?? string.Empty,
                 UpdatedUtc = DateTime.UtcNow,
+                MessageCount = list.Count,
                 Messages = list.Select(ToStoredMessage).ToList(),
             };
         }
@@ -200,6 +385,333 @@ namespace LangCode.Persistence
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 跨会话全文搜索：在全部历史会话的消息正文（用户正文 + 助手各内容块）里找关键字
+        /// </summary>
+        public static IList<ConversationSearchHit> Search(string query, int max = 50)
+        {
+            var hits = new List<ConversationSearchHit>();
+            var text = (query ?? string.Empty).Trim();
+            if (text.Length == 0)
+            {
+                return hits;
+            }
+
+            foreach (var conversation in LoadAll().OrderByDescending(c => c.UpdatedUtc))
+            {
+                if (hits.Count >= Math.Max(1, max))
+                {
+                    break;
+                }
+
+                var count = 0;
+                string snippet = null;
+
+                foreach (var message in conversation.Messages ?? [])
+                {
+                    if (Matches(message.Text, text, ref snippet))
+                    {
+                        count++;
+                    }
+
+                    foreach (var block in message.Blocks ?? [])
+                    {
+                        if (Matches(block.Text, text, ref snippet))
+                        {
+                            count++;
+                        }
+                    }
+                }
+
+                if (count > 0)
+                {
+                    hits.Add(new ConversationSearchHit
+                    {
+                        Id = conversation.Id,
+                        Title = conversation.Title,
+                        Model = conversation.Model,
+                        UpdatedUtc = conversation.UpdatedUtc,
+                        MatchCount = count,
+                        Snippet = snippet ?? string.Empty,
+                    });
+                }
+            }
+
+            return hits;
+        }
+
+        // ==================== 索引 / 文件读写（调用方须持 <see cref="Gate"/>） ====================
+
+        /// <summary>
+        /// 写单个会话文件并更新索引（须在锁内调用）
+        /// </summary>
+        private static void SaveConversationLocked(StoredConversation conversation, int maxItems)
+        {
+            WriteConversationFileLocked(conversation);
+
+            var index = ReadIndexLocked();
+            index.RemoveAll(c => string.Equals(c.Id, conversation.Id, StringComparison.OrdinalIgnoreCase));
+            index.Insert(0, ToIndexEntry(conversation));
+
+            index = index.OrderByDescending(c => c.UpdatedUtc).ToList();
+
+            if (maxItems > 0 && index.Count > maxItems)
+            {
+                var removed = index.Skip(maxItems).ToList();
+                index = index.Take(maxItems).ToList();
+                foreach (var stale in removed)
+                {
+                    TryDeleteConversationFileLocked(stale.Id);
+                }
+            }
+
+            WriteIndexLocked(index);
+        }
+
+        /// <summary>
+        /// 只取元数据（消息体置空），用于索引条目
+        /// </summary>
+        private static StoredConversation ToIndexEntry(StoredConversation source)
+        {
+            return new StoredConversation
+            {
+                Id = source.Id,
+                Title = source.Title,
+                Preview = source.Preview,
+                Model = source.Model,
+                UpdatedUtc = source.UpdatedUtc,
+                MessageCount = source.MessageCount > 0
+                    ? source.MessageCount
+                    : (source.Messages?.Count ?? 0),
+                Messages = [],
+            };
+        }
+
+        private static void WriteConversationFileLocked(StoredConversation conversation)
+        {
+            try
+            {
+                System.IO.Directory.CreateDirectory(Directory);
+
+                var path = PathFor(conversation.Id);
+                var temp = path + ".tmp";
+                File.WriteAllText(temp, Serialize(conversation), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+
+                File.Move(temp, path);
+            }
+            catch (Exception)
+            {
+                // 落盘失败不影响当前会话继续
+            }
+        }
+
+        private static void TryDeleteConversationFileLocked(string id)
+        {
+            try
+            {
+                var path = PathFor(id);
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch (Exception)
+            {
+                // 忽略
+            }
+        }
+
+        private static List<StoredConversation> ReadIndexLocked()
+        {
+            try
+            {
+                if (!File.Exists(IndexPath))
+                {
+                    // 没有索引（首次运行 / 索引丢失）：按会话文件重建一份
+                    return RebuildIndexLocked();
+                }
+
+                var index = Deserialize<ConversationIndex>(File.ReadAllText(IndexPath, Encoding.UTF8));
+                return index?.Conversations ?? [];
+            }
+            catch (Exception)
+            {
+                return RebuildIndexLocked();
+            }
+        }
+
+        private static void WriteIndexLocked(List<StoredConversation> entries)
+        {
+            try
+            {
+                System.IO.Directory.CreateDirectory(Directory);
+
+                var payload = new ConversationIndex { Conversations = entries ?? [] };
+                var temp = IndexPath + ".tmp";
+                File.WriteAllText(temp, Serialize(payload), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+                if (File.Exists(IndexPath))
+                {
+                    File.Delete(IndexPath);
+                }
+
+                File.Move(temp, IndexPath);
+            }
+            catch (Exception)
+            {
+                // 索引写失败：下次读取时由 RebuildIndexLocked 兜底重建
+            }
+        }
+
+        /// <summary>
+        /// 没有索引时，扫描会话文件重建（只取元数据，不保留消息体）
+        /// </summary>
+        private static List<StoredConversation> RebuildIndexLocked()
+        {
+            var entries = new List<StoredConversation>();
+
+            try
+            {
+                if (!System.IO.Directory.Exists(Directory))
+                {
+                    return entries;
+                }
+
+                foreach (var file in System.IO.Directory.GetFiles(Directory, "*.json", SearchOption.TopDirectoryOnly))
+                {
+                    if (string.Equals(Path.GetFileName(file), IndexFileName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        var conversation = Deserialize<StoredConversation>(File.ReadAllText(file, Encoding.UTF8));
+                        if (conversation != null)
+                        {
+                            entries.Add(ToIndexEntry(conversation));
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // 单个损坏：跳过
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                return entries;
+            }
+
+            entries = entries.OrderByDescending(c => c.UpdatedUtc).ToList();
+            WriteIndexLocked(entries);
+            return entries;
+        }
+
+        /// <summary>
+        /// 首次访问时把旧的单文件 <c>conversations.json</c> 迁移到新结构（须在锁内调用）
+        /// </summary>
+        private static void EnsureMigratedLocked()
+        {
+            if (_migrated)
+            {
+                return;
+            }
+
+            _migrated = true;
+
+            try
+            {
+                System.IO.Directory.CreateDirectory(Directory);
+
+                if (!File.Exists(LegacyFilePath))
+                {
+                    return;
+                }
+
+                var legacy = Deserialize<ConversationFile>(File.ReadAllText(LegacyFilePath, Encoding.UTF8));
+                var conversations = legacy?.Conversations ?? [];
+
+                foreach (var conversation in conversations)
+                {
+                    if (conversation == null || string.IsNullOrWhiteSpace(conversation.Id))
+                    {
+                        continue;
+                    }
+
+                    WriteConversationFileLocked(conversation);
+                }
+
+                var entries = conversations
+                    .Where(c => c != null && !string.IsNullOrWhiteSpace(c.Id))
+                    .Select(ToIndexEntry)
+                    .OrderByDescending(c => c.UpdatedUtc)
+                    .ToList();
+
+                WriteIndexLocked(entries);
+
+                // 迁移成功：把旧文件改名备份，避免下次重复迁移
+                try
+                {
+                    File.Move(LegacyFilePath, LegacyFilePath + ".migrated");
+                }
+                catch (Exception)
+                {
+                    // 改名失败无妨：下次会重新迁移（幂等，最坏多写一遍）
+                }
+            }
+            catch (Exception)
+            {
+                // 迁移失败：保持旧文件不动，下次再试
+            }
+        }
+
+        // ==================== 文件路径 / 序列化 ====================
+
+        private static string PathFor(string id)
+        {
+            var safe = new StringBuilder();
+            foreach (var c in id ?? string.Empty)
+            {
+                if (char.IsLetterOrDigit(c) || c == '-' || c == '_')
+                {
+                    safe.Append(c);
+                }
+            }
+
+            var name = safe.Length == 0 ? "conversation" : safe.ToString();
+            return Path.Combine(Directory, name + ".json");
+        }
+
+        private static string Serialize<T>(T value)
+        {
+            var serializer = new DataContractJsonSerializer(typeof(T));
+            using (var buffer = new MemoryStream())
+            {
+                using (var writer = JsonReaderWriterFactory.CreateJsonWriter(buffer, Encoding.UTF8, ownsStream: false, indent: true))
+                {
+                    serializer.WriteObject(writer, value);
+                    writer.Flush();
+                }
+
+                return Encoding.UTF8.GetString(buffer.ToArray());
+            }
+        }
+
+        private static T Deserialize<T>(string json)
+        {
+            var serializer = new DataContractJsonSerializer(typeof(T));
+            using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(json)))
+            {
+                return (T)serializer.ReadObject(stream);
+            }
         }
 
         // ==================== 映射 ====================
@@ -402,61 +914,6 @@ namespace LangCode.Persistence
         }
 
         /// <summary>
-        /// 跨会话全文搜索：在全部历史会话的消息正文（用户正文 + 助手各内容块）里找关键字
-        /// </summary>
-        public static IList<ConversationSearchHit> Search(string query, int max = 50)
-        {
-            var hits = new List<ConversationSearchHit>();
-            var text = (query ?? string.Empty).Trim();
-            if (text.Length == 0)
-            {
-                return hits;
-            }
-
-            foreach (var conversation in LoadAll().OrderByDescending(c => c.UpdatedUtc))
-            {
-                if (hits.Count >= Math.Max(1, max))
-                {
-                    break;
-                }
-
-                var count = 0;
-                string snippet = null;
-
-                foreach (var message in conversation.Messages ?? [])
-                {
-                    if (Matches(message.Text, text, ref snippet))
-                    {
-                        count++;
-                    }
-
-                    foreach (var block in message.Blocks ?? [])
-                    {
-                        if (Matches(block.Text, text, ref snippet))
-                        {
-                            count++;
-                        }
-                    }
-                }
-
-                if (count > 0)
-                {
-                    hits.Add(new ConversationSearchHit
-                    {
-                        Id = conversation.Id,
-                        Title = conversation.Title,
-                        Model = conversation.Model,
-                        UpdatedUtc = conversation.UpdatedUtc,
-                        MatchCount = count,
-                        Snippet = snippet ?? string.Empty,
-                    });
-                }
-            }
-
-            return hits;
-        }
-
-        /// <summary>
         /// 命中则返回 true，并在 snippet 为空时填入一小段上下文
         /// </summary>
         private static bool Matches(string source, string query, ref string snippet)
@@ -525,4 +982,3 @@ namespace LangCode.Persistence
         public string Summary => MatchCount + " 处匹配 · " + Snippet;
     }
 }
-

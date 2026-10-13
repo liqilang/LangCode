@@ -31,6 +31,107 @@ namespace LangCode.Agent
         }
 
         /// <summary>
+        /// 解析「扁平」对象：所有值统一转成字符串（工具动作参数用）。
+        /// 值本身是字符串时按其转义还原；否则保留原始文本（<c>null</c> 归一成空串）。
+        /// 失败返回 <c>null</c>。
+        /// </summary>
+        /// <remarks>
+        /// 与旧的 <c>MiniJson.ParseFlatObject</c> 语义一致；此处合并进 <see cref="LiteJson"/>，
+        /// 让全项目只保留一套 JSON 解析器（解析逻辑与 <see cref="Parse"/> 共用读取原语）。
+        /// </remarks>
+        public static Dictionary<string, string> ParseFlatObject(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var index = 0;
+            SkipWhitespace(json, ref index);
+
+            if (index >= json.Length || json[index] != '{')
+            {
+                return null;
+            }
+
+            index++;
+            while (true)
+            {
+                SkipWhitespace(json, ref index);
+                if (index >= json.Length)
+                {
+                    return null;
+                }
+
+                if (json[index] == '}')
+                {
+                    return result;
+                }
+
+                if (json[index] != '"')
+                {
+                    return null;
+                }
+
+                var key = ReadString(json, ref index);
+                if (key == null)
+                {
+                    return null;
+                }
+
+                SkipWhitespace(json, ref index);
+                if (index >= json.Length || json[index] != ':')
+                {
+                    return null;
+                }
+
+                index++;
+                SkipWhitespace(json, ref index);
+
+                string value;
+                if (index < json.Length && json[index] == '"')
+                {
+                    value = ReadString(json, ref index);
+                    if (value == null)
+                    {
+                        return null;
+                    }
+                }
+                else
+                {
+                    var start = index;
+                    while (index < json.Length && json[index] != ',' && json[index] != '}')
+                    {
+                        index++;
+                    }
+
+                    value = json.Substring(start, index - start).Trim();
+                    if (string.Equals(value, "null", StringComparison.OrdinalIgnoreCase))
+                    {
+                        value = string.Empty;
+                    }
+                }
+
+                result[key] = value;
+
+                SkipWhitespace(json, ref index);
+                if (index < json.Length && json[index] == ',')
+                {
+                    index++;
+                    continue;
+                }
+
+                if (index < json.Length && json[index] == '}')
+                {
+                    return result;
+                }
+
+                return null;
+            }
+        }
+
+        /// <summary>
         /// 取对象里的字符串字段（不存在 / 非字符串返回 null）
         /// </summary>
         public static string GetString(Dictionary<string, object> obj, string key)

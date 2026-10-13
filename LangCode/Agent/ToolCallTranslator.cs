@@ -127,7 +127,7 @@ namespace LangCode.Agent
         {
             var builder = new StringBuilder("{\"tool\":\"").Append(Escape(toolName)).Append('"');
 
-            var parsed = MiniJson.ParseFlatObject(Unescape(argumentsJson));
+            var parsed = LiteJson.ParseFlatObject(Unescape(argumentsJson));
             if (parsed != null)
             {
                 foreach (var pair in parsed)

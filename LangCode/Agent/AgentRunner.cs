@@ -307,6 +307,10 @@ namespace LangCode.Agent
             // 项目规则只读一次（一轮内不会变）：读盘 + 拼接有成本，不必每一步都做
             var projectRules = _settings != null && _settings.UseProjectRules ? ProjectRules.Load(_workspace?.Root) : null;
 
+            // 系统提示词在整轮任务里不变（工具清单 / 项目规则 / 工作区环境都不会中途改变）：
+            // 循环外构建一次即可 —— 既省去每步重复拼接，也让提示缓存的前缀保持稳定、更易命中
+            var systemPrompt = AgentPrompts.BuildSystemPrompt(_settings, projectRules, _toolchain?.Describe());
+
             // MaxSteps <= 0 = 不限制：循环由「模型不再要求用工具」或用户取消来结束
             for (var step = 0; MaxSteps <= 0 || step < MaxSteps; step++)
             {
@@ -329,7 +333,6 @@ namespace LangCode.Agent
                 callbacks.OnTurnStart?.Invoke();
 
                 var buffer = new StringBuilder();
-                var systemPrompt = AgentPrompts.BuildSystemPrompt(_settings, projectRules, _toolchain?.Describe());
 
                 // 服务端若回报了真实用量（含缓存命中），就以它为准记账；否则回退到本地估算
                 var usageReported = false;

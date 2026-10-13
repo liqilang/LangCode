@@ -1,10 +1,10 @@
-﻿using System;
+﻿using LangCode.Agent;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -31,11 +31,6 @@ namespace LangCode.Mcp
     /// </summary>
     public sealed class McpClient : IDisposable
     {
-        private static readonly Regex NameRegex = new Regex("\"name\"\\s*:\\s*\"(?<v>(?:[^\"\\\\]|\\\\.)*)\"", RegexOptions.CultureInvariant);
-        private static readonly Regex TextRegex = new Regex("\"text\"\\s*:\\s*\"(?<v>(?:[^\"\\\\]|\\\\.)*)\"", RegexOptions.CultureInvariant);
-        private static readonly Regex MessageRegex = new Regex("\"message\"\\s*:\\s*\"(?<v>(?:[^\"\\\\]|\\\\.)*)\"", RegexOptions.CultureInvariant);
-        private static readonly Regex IdRegex = new Regex("\"id\"\\s*:\\s*(?<v>\\d+)", RegexOptions.CultureInvariant);
-
         private readonly string _name;
         private readonly string _command;
         private readonly string _arguments;
@@ -117,14 +112,24 @@ namespace LangCode.Mcp
 
                 if (!string.IsNullOrEmpty(list))
                 {
-                    // tools/list 的结果里每个工具都有 name/description；顺序扫描即可
-                    // 用 name/description 的成对出现来切分
-                    var names = NameRegex.Matches(list).Cast<Match>().Select(m => Unescape(m.Groups["v"].Value)).ToList();
-                    var descriptions = DescriptionRegex.Matches(list).Cast<Match>().Select(m => Unescape(m.Groups["v"].Value)).ToList();
+                    // 用 JSON 解析而不是正则抠字段：字段名冲突 / 嵌套文本都不会再误判
+                    var root = LiteJson.ParseObject(list);
+                    var result = LiteJson.GetObject(root, "result");
+                    var tools = LiteJson.GetArray(result, "tools");
 
-                    for (var i = 0; i < names.Count; i++)
+                    if (tools != null)
                     {
-                        Tools.Add(new McpToolInfo(names[i], i < descriptions.Count ? descriptions[i] : string.Empty));
+                        foreach (var item in tools)
+                        {
+                            if (item is Dictionary<string, object> tool)
+                            {
+                                var toolName = LiteJson.GetString(tool, "name") ?? string.Empty;
+                                if (toolName.Length > 0)
+                                {
+                                    Tools.Add(new McpToolInfo(toolName, LiteJson.GetString(tool, "description") ?? string.Empty));
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -166,16 +171,31 @@ namespace LangCode.Mcp
                 return "调用超时（" + _name + "." + tool + "）";
             }
 
-            var error = MessageRegex.Match(response);
-            if (response.IndexOf("\"error\"", StringComparison.Ordinal) >= 0 && error.Success)
+            var root = LiteJson.ParseObject(response);
+            var error = LiteJson.GetObject(root, "error");
+            if (error != null)
             {
-                return "MCP 返回错误：" + Unescape(error.Groups["v"].Value);
+                return "MCP 返回错误：" + (LiteJson.GetString(error, "message") ?? "未知错误");
             }
 
-            var texts = TextRegex.Matches(response).Cast<Match>()
-                .Select(m => Unescape(m.Groups["v"].Value))
-                .Where(t => t.Length > 0)
-                .ToList();
+            var result = LiteJson.GetObject(root, "result");
+            var content = LiteJson.GetArray(result, "content");
+
+            var texts = new List<string>();
+            if (content != null)
+            {
+                foreach (var item in content)
+                {
+                    if (item is Dictionary<string, object> block)
+                    {
+                        var text = LiteJson.GetString(block, "text");
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            texts.Add(text);
+                        }
+                    }
+                }
+            }
 
             return texts.Count > 0 ? string.Join("\n", texts) : "（MCP 工具无文本返回）";
         }
@@ -258,10 +278,6 @@ namespace LangCode.Mcp
             }
         }
 
-        private static readonly Regex DescriptionRegex = new Regex(
-            "\"description\"\\s*:\\s*\"(?<v>(?:[^\"\\\\]|\\\\.)*)\"",
-            RegexOptions.CultureInvariant);
-
         private void Start()
         {
             var startInfo = new ProcessStartInfo
@@ -308,8 +324,8 @@ namespace LangCode.Mcp
                 string line;
                 while ((line = reader.ReadLine()) != null)
                 {
-                    var match = IdRegex.Match(line);
-                    if (!match.Success || !int.TryParse(match.Groups["v"].Value, out var id))
+                    var id = ExtractId(line);
+                    if (id < 0)
                     {
                         continue;   // 通知 / 日志：忽略
                     }
@@ -423,46 +439,35 @@ namespace LangCode.Mcp
             return builder.ToString();
         }
 
-        private static string Unescape(string value)
+        /// <summary>
+        /// 从一行 JSON-RPC 文本里取 <c>id</c>（通知 / 事件没有 id，返回 -1）
+        /// </summary>
+        private static int ExtractId(string line)
         {
-            if (string.IsNullOrEmpty(value))
+            if (string.IsNullOrWhiteSpace(line) || line[0] != '{')
             {
-                return string.Empty;
+                return -1;
             }
 
-            var builder = new StringBuilder();
-            for (var i = 0; i < value.Length; i++)
+            try
             {
-                if (value[i] != '\\' || i + 1 >= value.Length)
+                var obj = LiteJson.ParseObject(line);
+                if (obj == null || !obj.TryGetValue("id", out var value) || value == null)
                 {
-                    builder.Append(value[i]);
-                    continue;
+                    return -1;
                 }
 
-                i++;
-                switch (value[i])
+                if (value is double number)
                 {
-                    case 'n': builder.Append('\n'); break;
-                    case 'r': builder.Append('\r'); break;
-                    case 't': builder.Append('\t'); break;
-                    case '"': builder.Append('"'); break;
-                    case '\\': builder.Append('\\'); break;
-                    case '/': builder.Append('/'); break;
-                    case 'u':
-                        if (i + 4 < value.Length &&
-                            int.TryParse(value.Substring(i + 1, 4), System.Globalization.NumberStyles.HexNumber,
-                                System.Globalization.CultureInfo.InvariantCulture, out var code))
-                        {
-                            builder.Append((char)code);
-                            i += 4;
-                        }
-
-                        break;
-                    default: builder.Append(value[i]); break;
+                    return (int)number;
                 }
+
+                return int.TryParse(value as string, out var parsed) ? parsed : -1;
             }
-
-            return builder.ToString();
+            catch (Exception)
+            {
+                return -1;
+            }
         }
     }
 }

@@ -40,8 +40,11 @@ namespace LangCode.Persistence
         public double CachedTokens { get; set; }
     }
 
+    /// <summary>
+    /// 旧版单文件格式（<c>usage.json</c>）：仅用于一次性迁移
+    /// </summary>
     [DataContract(Name = "usageFile")]
-    internal sealed class UsageFile
+    internal sealed class LegacyUsageFile
     {
         [DataMember(Name = "version", Order = 1)]
         public int Version { get; set; } = 1;
@@ -51,7 +54,13 @@ namespace LangCode.Persistence
     }
 
     /// <summary>
-    /// 用量 / 费用统计的落盘与聚合
+    /// 用量 / 费用统计的落盘与聚合。
+    /// <para>
+    /// 存储改为<b>追加式 NDJSON</b>（<c>%APPDATA%\LangCode\vsext\usage.jsonl</c>，一行一条采样）：
+    /// 每次记账只追加一行，不再把整个数组重新序列化一遍 —— 高频记账（多步任务、流式）下省掉大量写放大。
+    /// 仅在超过 <see cref="MaxSamples"/> 需要裁剪、或 <see cref="Clear"/> 时才整体重写。
+    /// 旧的 <c>usage.json</c> 会在首次访问时自动迁移（原文件改名 <c>.migrated</c> 备份）。
+    /// </para>
     /// </summary>
     public static class UsageStore
     {
@@ -62,8 +71,13 @@ namespace LangCode.Persistence
 
         private static readonly object Gate = new object();
         private static List<StoredUsage> _cache;
+        private static bool _migrated;
 
-        public static string FilePath => Path.Combine(SettingsStore.Directory, "usage.json");
+        /// <summary>NDJSON 存储路径</summary>
+        public static string FilePath => Path.Combine(SettingsStore.Directory, "usage.jsonl");
+
+        /// <summary>旧版单文件路径（迁移来源）</summary>
+        private static string LegacyFilePath => Path.Combine(SettingsStore.Directory, "usage.json");
 
         /// <summary>
         /// 读取全部采样（首次访问时从磁盘载入并缓存）
@@ -72,12 +86,14 @@ namespace LangCode.Persistence
         {
             lock (Gate)
             {
+                EnsureMigratedLocked();
+
                 if (_cache != null)
                 {
                     return _cache;
                 }
 
-                _cache = ReadFromDisk();
+                _cache = ReadFromDiskLocked();
                 return _cache;
             }
         }
@@ -110,15 +126,25 @@ namespace LangCode.Persistence
 
             lock (Gate)
             {
-                var samples = LoadAll().ToList();
+                EnsureMigratedLocked();
+
+                var samples = _cache ?? ReadFromDiskLocked();
+                samples = new List<StoredUsage>(samples);
                 samples.Add(sample);
+
                 if (samples.Count > MaxSamples)
                 {
+                    // 超限才整体重写一次（裁掉最旧的）
                     samples = samples.OrderByDescending(s => s.AtUtc).Take(MaxSamples).OrderBy(s => s.AtUtc).ToList();
+                    _cache = samples;
+                    WriteAllLocked(_cache);
                 }
-
-                _cache = samples;
-                WriteToDisk(_cache);
+                else
+                {
+                    // 常规路径：内存追加 + 磁盘追加一行（不全量重写）
+                    _cache = samples;
+                    AppendLocked(sample);
+                }
             }
 
             return sample;
@@ -128,8 +154,21 @@ namespace LangCode.Persistence
         {
             lock (Gate)
             {
+                EnsureMigratedLocked();
+
                 _cache = [];
-                WriteToDisk(_cache);
+
+                try
+                {
+                    if (File.Exists(FilePath))
+                    {
+                        File.Delete(FilePath);
+                    }
+                }
+                catch (Exception)
+                {
+                    // 删不掉（被占用等）：内存已清空，下次写入会覆盖
+                }
             }
         }
 
@@ -217,49 +256,85 @@ namespace LangCode.Persistence
             return builder.ToString();
         }
 
-        // ==================== 磁盘读写 ====================
+        // ==================== 磁盘读写（调用方须持 <see cref="Gate"/>） ====================
 
-        private static List<StoredUsage> ReadFromDisk()
+        /// <summary>
+        /// 逐行读取 NDJSON（单行损坏只跳过该行）
+        /// </summary>
+        private static List<StoredUsage> ReadFromDiskLocked()
         {
+            var result = new List<StoredUsage>();
+
             try
             {
                 if (!File.Exists(FilePath))
                 {
-                    return [];
+                    return result;
                 }
 
-                var json = File.ReadAllText(FilePath, Encoding.UTF8);
-                var serializer = new DataContractJsonSerializer(typeof(UsageFile));
-                using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(json)))
+                foreach (var line in File.ReadLines(FilePath, Encoding.UTF8))
                 {
-                    var file = serializer.ReadObject(stream) as UsageFile;
-                    return file?.Samples ?? [];
+                    var text = line?.Trim();
+                    if (string.IsNullOrEmpty(text))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        var sample = Deserialize<StoredUsage>(text);
+                        if (sample != null)
+                        {
+                            result.Add(sample);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // 单行损坏：跳过，不影响其余采样
+                    }
                 }
             }
             catch (Exception)
             {
-                return [];
+                return result;
             }
+
+            return result;
         }
 
-        private static void WriteToDisk(List<StoredUsage> samples)
+        /// <summary>
+        /// 追加一行（常规记账路径）
+        /// </summary>
+        private static void AppendLocked(StoredUsage sample)
         {
             try
             {
-                Directory.CreateDirectory(SettingsStore.Directory);
+                System.IO.Directory.CreateDirectory(SettingsStore.Directory);
+                File.AppendAllText(FilePath, Serialize(sample) + "\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            }
+            catch (Exception)
+            {
+                // 写失败不阻断对话
+            }
+        }
 
-                var serializer = new DataContractJsonSerializer(typeof(UsageFile));
-                var buffer = new MemoryStream();
-                using (var writer = JsonReaderWriterFactory.CreateJsonWriter(
-                    buffer, Encoding.UTF8, ownsStream: false, indent: true))
+        /// <summary>
+        /// 整体重写（裁剪 / 迁移时用；原子替换）
+        /// </summary>
+        private static void WriteAllLocked(List<StoredUsage> samples)
+        {
+            try
+            {
+                System.IO.Directory.CreateDirectory(SettingsStore.Directory);
+
+                var builder = new StringBuilder();
+                foreach (var sample in samples ?? [])
                 {
-                    serializer.WriteObject(writer, new UsageFile { Samples = samples });
-                    writer.Flush();
+                    builder.Append(Serialize(sample)).Append('\n');
                 }
 
-                var json = Encoding.UTF8.GetString(buffer.ToArray());
                 var temp = FilePath + ".tmp";
-                File.WriteAllText(temp, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                File.WriteAllText(temp, builder.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
                 if (File.Exists(FilePath))
                 {
@@ -271,6 +346,84 @@ namespace LangCode.Persistence
             catch (Exception)
             {
                 // 写失败不阻断对话
+            }
+        }
+
+        /// <summary>
+        /// 首次访问时把旧的单文件 <c>usage.json</c> 迁移到 NDJSON（须在锁内调用）
+        /// </summary>
+        private static void EnsureMigratedLocked()
+        {
+            if (_migrated)
+            {
+                return;
+            }
+
+            _migrated = true;
+
+            try
+            {
+                System.IO.Directory.CreateDirectory(SettingsStore.Directory);
+
+                if (!File.Exists(LegacyFilePath))
+                {
+                    return;
+                }
+
+                var legacy = Deserialize<LegacyUsageFile>(File.ReadAllText(LegacyFilePath, Encoding.UTF8));
+                var samples = legacy?.Samples ?? [];
+
+                if (samples.Count > 0)
+                {
+                    // 与已有 NDJSON 合并（通常 NDJSON 还不存在），按时间排序并限制总量
+                    var merged = ReadFromDiskLocked().Concat(samples).OrderBy(s => s.AtUtc).ToList();
+                    if (merged.Count > MaxSamples)
+                    {
+                        merged = merged.OrderByDescending(s => s.AtUtc).Take(MaxSamples).OrderBy(s => s.AtUtc).ToList();
+                    }
+
+                    WriteAllLocked(merged);
+                }
+
+                // 迁移成功：把旧文件改名备份，避免下次重复迁移
+                try
+                {
+                    File.Move(LegacyFilePath, LegacyFilePath + ".migrated");
+                }
+                catch (Exception)
+                {
+                    // 改名失败无妨：下次会重新迁移（幂等）
+                }
+            }
+            catch (Exception)
+            {
+                // 迁移失败：保持旧文件不动，下次再试
+            }
+        }
+
+        // ==================== 序列化 ====================
+
+        private static string Serialize<T>(T value)
+        {
+            var serializer = new DataContractJsonSerializer(typeof(T));
+            using (var buffer = new MemoryStream())
+            {
+                using (var writer = JsonReaderWriterFactory.CreateJsonWriter(buffer, Encoding.UTF8, ownsStream: false, indent: false))
+                {
+                    serializer.WriteObject(writer, value);
+                    writer.Flush();
+                }
+
+                return Encoding.UTF8.GetString(buffer.ToArray()).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            }
+        }
+
+        private static T Deserialize<T>(string json)
+        {
+            var serializer = new DataContractJsonSerializer(typeof(T));
+            using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(json)))
+            {
+                return (T)serializer.ReadObject(stream);
             }
         }
     }
@@ -318,4 +471,3 @@ namespace LangCode.Persistence
         }
     }
 }
-

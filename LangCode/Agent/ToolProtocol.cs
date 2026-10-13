@@ -52,7 +52,7 @@ namespace LangCode.Agent
 
             foreach (Match match in FenceRegex.Matches(assistantText))
             {
-                var parsed = MiniJson.ParseFlatObject(match.Groups["body"].Value);
+                var parsed = LiteJson.ParseFlatObject(match.Groups["body"].Value);
                 if (parsed == null)
                 {
                     continue;

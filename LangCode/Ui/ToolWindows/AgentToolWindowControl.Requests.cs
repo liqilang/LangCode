@@ -490,6 +490,57 @@ namespace LangCode.Ui.ToolWindows
         }
 
         /// <summary>
+        /// 从这条消息分叉：保留到它为止（含）的对话，丢弃其后的内容并换一个新的会话 id ——
+        /// 相当于把当前这段对话复制成一个新分支继续，原会话仍完整保留在历史里。
+        /// 与「编辑重发」的区别：编辑重发会改写原会话，分叉则两者都留下，便于对比不同走向。
+        /// </summary>
+        private async void ForkMessage_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                var message = (sender as FrameworkElement)?.DataContext as ChatMessage;
+                if (message == null)
+                {
+                    return;
+                }
+
+                if (_session.IsBusy)
+                {
+                    ShowSessionActionHint("正在生成中，等这一轮结束后再分叉");
+                    return;
+                }
+
+                EnsureWorkspace();
+
+                // 先把「分叉前的原始对话」写进历史，确保它不受后续截断影响
+                _session.SaveCurrent(_settings);
+
+                if (!_session.ForkFrom(message))
+                {
+                    return;
+                }
+
+                // 分叉后的这段作为新会话落盘，立刻出现在历史里
+                _session.SaveCurrent(_settings);
+
+                ResetTurnActions();
+                UpdateSendState();
+                UpdateTokens();
+
+                HistoryDrawer.SetActiveConversation(_session.ConversationId);
+                ScrollToEnd();
+
+                ShowSessionActionHint("已从此处分叉为新会话；原会话仍保留在历史记录里");
+            }
+            catch (Exception)
+            {
+                // 分叉失败不影响现有会话
+            }
+        }
+
+        /// <summary>
         /// 接着跑：「继续任务 / 恢复任务 / 重试」都走这里
         /// </summary>
         private async Task ResumeAsync()

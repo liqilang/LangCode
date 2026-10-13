@@ -750,31 +750,18 @@ namespace LangCode.Chat
                 return;
             }
 
-            var all = ConversationStore.LoadAll();
+            // 只写当前这一个会话文件 + 更新索引：不再把全部会话读进来再整体重写
             var snapshot = ConversationStore.Snapshot(ConversationId, CurrentModel, Messages);
-            var index = all.FindIndex(c => c.Id == ConversationId);
-            if (index >= 0)
-            {
-                all[index] = snapshot;
-            }
-            else
-            {
-                all.Insert(0, snapshot);
-            }
-
-            if (all.Count > MaxHistoryItems)
-            {
-                all = all.OrderByDescending(c => c.UpdatedUtc).Take(MaxHistoryItems).ToList();
-            }
-
-            ConversationStore.SaveAll(all);
+            ConversationStore.SaveConversation(snapshot, MaxHistoryItems);
             ReloadHistory();
         }
 
         public void ReloadHistory()
         {
             History.Clear();
-            foreach (var stored in ConversationStore.LoadAll().OrderByDescending(c => c.UpdatedUtc))
+
+            // 只读索引（元数据）：不再为了列历史而解析每条会话的全部消息
+            foreach (var stored in ConversationStore.LoadSummaries().OrderByDescending(c => c.UpdatedUtc))
             {
                 History.Add(new ConversationSummary
                 {
@@ -783,7 +770,7 @@ namespace LangCode.Chat
                     Preview = stored.Preview,
                     Model = stored.Model,
                     UpdatedUtc = stored.UpdatedUtc,
-                    MessageCount = stored.Messages?.Count ?? 0,
+                    MessageCount = stored.MessageCount > 0 ? stored.MessageCount : (stored.Messages?.Count ?? 0),
                 });
             }
         }
@@ -795,7 +782,7 @@ namespace LangCode.Chat
                 return false;
             }
 
-            var stored = ConversationStore.LoadAll().FirstOrDefault(c => c.Id == id);
+            var stored = ConversationStore.LoadConversationById(id);
             if (stored == null)
             {
                 return false;
@@ -866,15 +853,13 @@ namespace LangCode.Chat
                 return;
             }
 
-            var all = ConversationStore.LoadAll();
-            all.RemoveAll(c => c.Id == id);
-            ConversationStore.SaveAll(all);
+            ConversationStore.DeleteConversation(id);
             ReloadHistory();
         }
 
         public void ClearHistory()
         {
-            ConversationStore.SaveAll([]);
+            ConversationStore.ClearAll();
             History.Clear();
         }
     }

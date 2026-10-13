@@ -275,6 +275,22 @@
                                                            FontSize="10.5"
                                                            Foreground="{DynamicResource Ap.FgFaint}"
                                                            Visibility="{Binding IsQueued, Converter={StaticResource BoolToVis}}"/>
+                                                <!-- 从这里分叉：保留这条消息及之前的内容，另起一个新分支 -->
+                                                <Button Style="{StaticResource ActButton}"
+                                                        HorizontalAlignment="Right"
+                                                        Margin="0,5,1,0"
+                                                        Click="ForkMessage_Click"
+                                                        ToolTip="从此处另开一个分支：保留这条消息及之前的内容，之后的对话在新分支里继续（原会话仍保留在历史里）">
+                                                        <StackPanel Orientation="Horizontal">
+                                                                <prim:Icon IconName="expand"
+                                                                           Width="10"
+                                                                           Height="10"
+                                                                           VerticalAlignment="Center"/>
+                                                                <TextBlock Text="分叉"
+                                                                           Margin="4,0,0,0"
+                                                                           Style="{StaticResource ActLabel}"/>
+                                                        </StackPanel>
+                                                </Button>
                                         </StackPanel>
                                 </Grid>
                         </DataTemplate>

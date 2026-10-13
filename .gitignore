@@ -49,11 +49,14 @@ $RECYCLE.BIN/
 
 # 运行时用户数据（理论上不在仓库内，这里兜底防止误提交）
 conversations.json
+conversations/
 roo-state.json
 settings.json
 audit.log
 audit.log.1
 usage.json
+usage.jsonl
+*.jsonl
 modes.json
 
 # 检查点影子仓库（%APPDATA% 下，仍兜底）
