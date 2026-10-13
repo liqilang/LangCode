@@ -1,0 +1,395 @@
+﻿<UserControl x:Class="LangCode.Ui.ToolWindows.HistoryDrawerControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="clr-namespace:LangCode.Ui.Primitive">
+
+        <UserControl.Resources>
+                <ResourceDictionary>
+                        <!-- 调色板由 ThemeManager.Attach(this) 注入（同一可变字典实例，随 VS 主题实时刷新） -->
+                        <ResourceDictionary.MergedDictionaries>
+                                <ResourceDictionary Source="pack://application:,,,/LangCode;component/Ui/Theme/Controls.xaml"/>
+                        </ResourceDictionary.MergedDictionaries>
+
+                        <Style x:Key="HistGroupLabel"
+                               TargetType="TextBlock">
+                                <Setter Property="FontSize"
+                                        Value="10.5"/>
+                                <Setter Property="FontWeight"
+                                        Value="SemiBold"/>
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource Ap.FgFaint}"/>
+                                <Setter Property="Margin"
+                                        Value="0,16,0,7"/>
+                        </Style>
+
+                        <Style x:Key="HistItem"
+                               TargetType="Button">
+                                <Setter Property="HorizontalContentAlignment"
+                                        Value="Stretch"/>
+                                <Setter Property="Cursor"
+                                        Value="Hand"/>
+                                <Setter Property="Margin"
+                                        Value="0,0,0,2"/>
+                                <!--
+                                    卡片底色必须显式给主题色：模板里用的是 TemplateBinding Background，
+                                    不设默认值会继承 WPF Button 的系统浅色背景 —— 深色主题下卡片会变白，
+                                    与 FgStrong 的白色标题撞在一起导致看不清（对齐欢迎页 HomeCard 的做法）
+                                -->
+                                <Setter Property="Background"
+                                        Value="{DynamicResource Ap.BgCard}"/>
+                                <Setter Property="BorderBrush"
+                                        Value="{DynamicResource Ap.BorderSoft}"/>
+                                <Setter Property="Template">
+                                        <Setter.Value>
+                                                <ControlTemplate TargetType="Button">
+                                                        <Border x:Name="Bd"
+                                                                Background="{TemplateBinding Background}"
+                                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                                BorderThickness="1"
+                                                                CornerRadius="10"
+                                                                Padding="11,9,34,9">
+                                                                <ContentPresenter HorizontalAlignment="Stretch"/>
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver"
+                                                                         Value="True">
+                                                                        <Setter TargetName="Bd"
+                                                                                Property="Background"
+                                                                                Value="{DynamicResource Ap.AccentSoft}"/>
+                                                                        <Setter TargetName="Bd"
+                                                                                Property="BorderBrush"
+                                                                                Value="{DynamicResource Ap.AccentBorder}"/>
+                                                                </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                        </Setter.Value>
+                                </Setter>
+                                <Style.Triggers>
+                                        <!-- 当前正在查看的会话高亮（设计稿里的 active 态）
+                                                 触发器放样式里而不是 DataTemplate.Triggers：无名 Setter 在模板里会
+                                                 被解析到 ControlTemplate 的 ContentPresenter 上而编译不过 -->
+                                        <DataTrigger Binding="{Binding IsActive}"
+                                                     Value="True">
+                                                <Setter Property="Background"
+                                                        Value="{DynamicResource Ap.AccentSoft}"/>
+                                                <Setter Property="BorderBrush"
+                                                        Value="{DynamicResource Ap.AccentBorder}"/>
+                                        </DataTrigger>
+                                </Style.Triggers>
+                        </Style>
+
+                        <Style x:Key="HistDeleteButton"
+                               TargetType="Button">
+                                <Setter Property="Width"
+                                        Value="24"/>
+                                <Setter Property="Height"
+                                        Value="24"/>
+                                <Setter Property="Cursor"
+                                        Value="Hand"/>
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource Ap.FgFaint}"/>
+                                <Setter Property="Template">
+                                        <Setter.Value>
+                                                <ControlTemplate TargetType="Button">
+                                                        <Border x:Name="Bd"
+                                                                Background="Transparent"
+                                                                CornerRadius="5">
+                                                                <ContentPresenter HorizontalAlignment="Center"
+                                                                                  VerticalAlignment="Center"/>
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver"
+                                                                         Value="True">
+                                                                        <Setter TargetName="Bd"
+                                                                                Property="Background"
+                                                                                Value="{DynamicResource Ap.RedSoft}"/>
+                                                                        <Setter Property="Foreground"
+                                                                                Value="{DynamicResource Ap.Red}"/>
+                                                                </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                        </Setter.Value>
+                                </Setter>
+                        </Style>
+                </ResourceDictionary>
+        </UserControl.Resources>
+
+        <Grid x:Name="Root"
+              Background="{DynamicResource Ap.BgElevated}">
+                <Grid.RenderTransform>
+                        <TranslateTransform x:Name="Slide"
+                                            X="0"/>
+                </Grid.RenderTransform>
+                <Grid.RowDefinitions>
+                        <RowDefinition Height="48"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- 抽屉头 -->
+                <Border Grid.Row="0"
+                        Background="{DynamicResource Ap.BgElevated}"
+                        BorderBrush="{DynamicResource Ap.BorderSoft}"
+                        BorderThickness="0,0,0,1">
+                        <Grid Margin="6,0,8,0">
+                                <Button x:Name="BtnBack"
+                                        Style="{StaticResource IconButton}"
+                                        HorizontalAlignment="Left"
+                                        AutomationProperties.Name="返回"
+                                        Click="Back_Click"
+                                        ToolTip="返回">
+                                        <ui:Icon IconName="chevron-left"
+                                                 Width="16"
+                                                 Height="16"/>
+                                </Button>
+                                <TextBlock Text="历史记录"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource Ap.FgBright}"
+                                           VerticalAlignment="Center"
+                                           Margin="34,0,0,0"/>
+                                <StackPanel Orientation="Horizontal"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Center">
+                                        <!-- 多选：进入批量模式（勾选 + 底部「删除选中」） -->
+                                        <Button x:Name="BtnMulti"
+                                                Style="{StaticResource IconButton}"
+                                                AutomationProperties.Name="多选"
+                                                Click="Multi_Click"
+                                                ToolTip="多选">
+                                                <ui:Icon IconName="check"
+                                                         Width="15"
+                                                         Height="15"/>
+                                        </Button>
+                                        <Button x:Name="BtnNew"
+                                                Style="{StaticResource IconButton}"
+                                                AutomationProperties.Name="新建会话"
+                                                Click="New_Click"
+                                                ToolTip="新建会话">
+                                                <ui:Icon IconName="plus"
+                                                         Width="15"
+                                                         Height="15"/>
+                                        </Button>
+                                        <Button x:Name="BtnClear"
+                                                Style="{StaticResource IconButton}"
+                                                AutomationProperties.Name="清空全部会话"
+                                                Click="Clear_Click"
+                                                ToolTip="清空全部">
+                                                <ui:Icon IconName="trash"
+                                                         Width="15"
+                                                         Height="15"/>
+                                        </Button>
+                                </StackPanel>
+                        </Grid>
+                </Border>
+
+                <!-- 抽屉体 -->
+                <ScrollViewer Grid.Row="1"
+                              VerticalScrollBarVisibility="Auto"
+                              Padding="14,14,14,24">
+                        <StackPanel>
+                                <Grid Margin="0,0,0,14">
+                                        <TextBox x:Name="HistSearch"
+                                                 Style="{StaticResource SearchInput}"
+                                                 TextChanged="Search_TextChanged"/>
+                                        <ui:Icon IconName="search"
+                                                 Width="14"
+                                                 Height="14"
+                                                 Foreground="{DynamicResource Ap.FgFaint}"
+                                                 HorizontalAlignment="Left"
+                                                 VerticalAlignment="Center"
+                                                 Margin="9,0,0,0"
+                                                 IsHitTestVisible="False"/>
+                                </Grid>
+
+                                <!--
+                    列表是**数据驱动**的：条目来自 ChatSession.History，
+                    落盘在 %APPDATA%\LangCode\vsext\conversations.json
+                    交互 ：点条目 = 载入这个会话；右侧 × = 删这一条；右上角垃圾桶 = 清空全部；
+                    搜索框按「标题 + 摘要 + 模型」过滤
+                    分组（今天 / 昨天 / 更早）由 CollectionViewSource 的 GroupDescriptions 提供
+                -->
+                                <ItemsControl x:Name="HistList">
+                                        <ItemsControl.GroupStyle>
+                                                <GroupStyle>
+                                                        <GroupStyle.HeaderTemplate>
+                                                                <DataTemplate>
+                                                                        <TextBlock Text="{Binding Name}"
+                                                                                   Style="{StaticResource HistGroupLabel}"/>
+                                                                </DataTemplate>
+                                                        </GroupStyle.HeaderTemplate>
+                                                </GroupStyle>
+                                        </ItemsControl.GroupStyle>
+                                        <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                        <Button Style="{StaticResource HistItem}"
+                                                                Click="Item_Click"
+                                                                ToolTip="载入这个会话">
+                                                                <Grid>
+                                                                        <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="Auto"/>
+                                                                                <ColumnDefinition Width="*"/>
+                                                                        </Grid.ColumnDefinitions>
+
+                                                                        <!-- 多选勾选框：仅多选模式显示；未选中=空心，选中=主色实心 + 白勾 -->
+                                                                        <Border Grid.Column="0"
+                                                                                Margin="0,0,9,0"
+                                                                                VerticalAlignment="Center">
+                                                                                <Border.Style>
+                                                                                        <Style TargetType="Border"
+                                                                                               BasedOn="{StaticResource MultiCheck}">
+                                                                                                <Style.Triggers>
+                                                                                                        <DataTrigger Binding="{Binding IsSelected}"
+                                                                                                                     Value="True">
+                                                                                                                <Setter Property="Background"
+                                                                                                                        Value="{DynamicResource Ap.Accent}"/>
+                                                                                                                <Setter Property="BorderBrush"
+                                                                                                                        Value="{DynamicResource Ap.Accent}"/>
+                                                                                                        </DataTrigger>
+                                                                                                        <DataTrigger Binding="{Binding IsMultiSelect, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                                                                     Value="False">
+                                                                                                                <Setter Property="Visibility"
+                                                                                                                        Value="Collapsed"/>
+                                                                                                        </DataTrigger>
+                                                                                                </Style.Triggers>
+                                                                                        </Style>
+                                                                                </Border.Style>
+                                                                                <ui:Icon IconName="check"
+                                                                                         Width="11"
+                                                                                         Height="11">
+                                                                                        <ui:Icon.Style>
+                                                                                                <Style TargetType="ui:Icon">
+                                                                                                        <Setter Property="Foreground"
+                                                                                                                Value="Transparent"/>
+                                                                                                        <Style.Triggers>
+                                                                                                                <DataTrigger Binding="{Binding IsSelected}"
+                                                                                                                             Value="True">
+                                                                                                                        <Setter Property="Foreground"
+                                                                                                                                Value="{DynamicResource Ap.White}"/>
+                                                                                                                </DataTrigger>
+                                                                                                        </Style.Triggers>
+                                                                                                </Style>
+                                                                                        </ui:Icon.Style>
+                                                                                </ui:Icon>
+                                                                        </Border>
+
+                                                                        <StackPanel Grid.Column="1">
+                                                                                <TextBlock Text="{Binding Title}"
+                                                                                           FontSize="12.5"
+                                                                                           Foreground="{DynamicResource Ap.FgStrong}"
+                                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                                <TextBlock Text="{Binding Preview}"
+                                                                                           FontSize="11"
+                                                                                           Margin="0,3,0,0"
+                                                                                           Foreground="{DynamicResource Ap.FgFaint}"
+                                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                                <StackPanel Orientation="Horizontal"
+                                                                                            Margin="0,5,0,0">
+                                                                                        <Border Background="{DynamicResource Ap.ControlBg}"
+                                                                                                CornerRadius="3"
+                                                                                                Padding="5,1">
+                                                                                                <TextBlock Text="{Binding ModelBadge}"
+                                                                                                           FontFamily="{DynamicResource Ap.FontCode}"
+                                                                                                           FontSize="10.5"
+                                                                                                           Foreground="{DynamicResource Ap.FgFaint}"/>
+                                                                                        </Border>
+                                                                                        <TextBlock Text="{Binding CountLabel}"
+                                                                                                   FontSize="10.5"
+                                                                                                   Margin="6,0,0,0"
+                                                                                                   Foreground="{DynamicResource Ap.FgFaint}"/>
+                                                                                        <TextBlock Text="{Binding TimeLabel}"
+                                                                                                   FontSize="10.5"
+                                                                                                   Margin="6,0,0,0"
+                                                                                                   Foreground="{DynamicResource Ap.FgFaint}"/>
+                                                                                </StackPanel>
+                                                                        </StackPanel>
+
+                                                                        <!-- 单项删除（hover 才需要，多选模式下隐藏） -->
+                                                                        <Button HorizontalAlignment="Right"
+                                                                                VerticalAlignment="Center"
+                                                                                Click="Delete_Click"
+                                                                                ToolTip="删除这个会话">
+                                                                                <Button.Style>
+                                                                                        <Style TargetType="Button"
+                                                                                               BasedOn="{StaticResource HistDeleteButton}">
+                                                                                                <Style.Triggers>
+                                                                                                        <DataTrigger Binding="{Binding IsMultiSelect, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                                                                     Value="True">
+                                                                                                                <Setter Property="Visibility"
+                                                                                                                        Value="Collapsed"/>
+                                                                                                        </DataTrigger>
+                                                                                                </Style.Triggers>
+                                                                                        </Style>
+                                                                                </Button.Style>
+                                                                                <ui:Icon IconName="close"
+                                                                                         Width="13"
+                                                                                         Height="13"/>
+                                                                        </Button>
+                                                                </Grid>
+                                                        </Button>
+                                                </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <StackPanel x:Name="EmptyState"
+                                            Visibility="Collapsed"
+                                            Margin="0,48,0,0"
+                                            HorizontalAlignment="Center">
+                                        <ui:Icon IconName="history"
+                                                 Width="30"
+                                                 Height="30"
+                                                 Foreground="{DynamicResource Ap.FgFaint}"
+                                                 HorizontalAlignment="Center"
+                                                 Opacity="0.4"/>
+                                        <TextBlock x:Name="EmptyText"
+                                                   Text="暂无历史会话"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource Ap.FgFaint}"
+                                                   Margin="0,8,0,0"
+                                                   HorizontalAlignment="Center"/>
+                                </StackPanel>
+                        </StackPanel>
+                </ScrollViewer>
+
+                <!-- 多选操作条（仅多选模式显示） -->
+                <Border Grid.Row="2"
+                        Background="{DynamicResource Ap.BgElevated}"
+                        BorderBrush="{DynamicResource Ap.BorderSoft}"
+                        BorderThickness="0,1,0,0"
+                        Padding="12,10">
+                        <Border.Style>
+                                <Style TargetType="Border">
+                                        <Setter Property="Visibility"
+                                                Value="Collapsed"/>
+                                        <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsMultiSelect, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                             Value="True">
+                                                        <Setter Property="Visibility"
+                                                                Value="Visible"/>
+                                                </DataTrigger>
+                                        </Style.Triggers>
+                                </Style>
+                        </Border.Style>
+                        <DockPanel>
+                                <TextBlock x:Name="MultiCount"
+                                           DockPanel.Dock="Left"
+                                           Text="已选 0 项"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource Ap.FgBody}"
+                                           VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal"
+                                            HorizontalAlignment="Right">
+                                        <Button x:Name="BtnCancelMulti"
+                                                Style="{StaticResource BtnSmall}"
+                                                Content="取消"
+                                                Click="CancelMulti_Click"/>
+                                        <Button x:Name="BtnDeleteSelected"
+                                                Style="{StaticResource BtnDanger}"
+                                                Margin="8,0,0,0"
+                                                Content="删除选中"
+                                                Click="DeleteSelected_Click"/>
+                                </StackPanel>
+                        </DockPanel>
+                </Border>
+        </Grid>
+</UserControl>

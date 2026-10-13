@@ -1,0 +1,23 @@
+﻿<Project>
+
+  <!--
+    ===========================================================================
+    VSSDK 打包目标的导入（仅作用于 LangCode 目录下的项目）
+
+    为什么放在 Directory.Build.targets 而不是 .csproj：
+      · Microsoft.VsSDK.targets 会往 PrepareForRunDependsOn 里追加 CreateVsixContainer
+        （VSIX 容器就是在这里生成的）；
+      · SDK 风格工程的 .csproj 正文在 Microsoft.Common.targets 之前求值，
+        若在那里 Import，追加结果会被 Common.targets 的默认赋值覆盖，
+        结果就是「编译通过但没有 .vsix」；
+      · Directory.Build.targets 由 Microsoft.Common.targets 在其末尾导入，
+        此时追加才是有效的
+
+    VSToolsPath 由 Microsoft.VSSDK.BuildTools 的 props 指向 NuGet 包内的 tools 目录
+    ===========================================================================
+  -->
+
+  <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets"
+          Condition="Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets')" />
+
+</Project>
