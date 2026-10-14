@@ -10,48 +10,59 @@
       <Group guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" priority="0x0600">
         <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN" />
       </Group>
+      <Group guid="guidLangCodeCmdSet" id="LangCodeCodeWinSubMenuGroup" priority="0x0000">
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinSubMenu" />
+      </Group>
     </Groups>
+    <Menus>
+      <Menu guid="guidLangCodeCmdSet" id="LangCodeCodeWinSubMenu" priority="0x0600" type="Menu">
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Strings>
+          <ButtonText>LangCode</ButtonText>
+        </Strings>
+      </Menu>
+    </Menus>
     <Buttons>
       <Button guid="guidLangCodeCmdSet" id="OpenAgentToolWindowCommandId" priority="0x0100" type="Button">
         <Parent guid="guidLangCodeCmdSet" id="LangCodeMenuGroup" />
         <Strings>
-          <ButtonText>Open LangCode Assistant</ButtonText>
+          <ButtonText>打开 LangCode</ButtonText>
         </Strings>
       </Button>
       <Button guid="guidLangCodeCmdSet" id="ExplainSelectionCommandId" priority="0x0100" type="Button">
-        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinSubMenuGroup" />
         <Strings>
-          <ButtonText>LangCode: Explain Selection</ButtonText>
+          <ButtonText>解释选择</ButtonText>
         </Strings>
       </Button>
       <Button guid="guidLangCodeCmdSet" id="RefactorSelectionCommandId" priority="0x0110" type="Button">
-        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinSubMenuGroup" />
         <Strings>
-          <ButtonText>LangCode: Refactor Selection</ButtonText>
+          <ButtonText>重构选择</ButtonText>
         </Strings>
       </Button>
       <Button guid="guidLangCodeCmdSet" id="GenerateTestsCommandId" priority="0x0120" type="Button">
-        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinSubMenuGroup" />
         <Strings>
-          <ButtonText>LangCode: Generate Tests</ButtonText>
+          <ButtonText>生成测试</ButtonText>
         </Strings>
       </Button>
       <Button guid="guidLangCodeCmdSet" id="GenerateDocsCommandId" priority="0x0130" type="Button">
-        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinSubMenuGroup" />
         <Strings>
-          <ButtonText>LangCode: Generate Docs</ButtonText>
+          <ButtonText>生成文档</ButtonText>
         </Strings>
       </Button>
       <Button guid="guidLangCodeCmdSet" id="FixSelectionCommandId" priority="0x0140" type="Button">
-        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinSubMenuGroup" />
         <Strings>
-          <ButtonText>LangCode: Fix Selection</ButtonText>
+          <ButtonText>修复选择</ButtonText>
         </Strings>
       </Button>
       <Button guid="guidLangCodeCmdSet" id="InlineEditCommandId" priority="0x0150" type="Button">
-        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinGroup" />
+        <Parent guid="guidLangCodeCmdSet" id="LangCodeCodeWinSubMenuGroup" />
         <Strings>
-          <ButtonText>LangCode: Inline Edit (Ctrl+K)</ButtonText>
+          <ButtonText>内联编辑 (Ctrl+K)</ButtonText>
         </Strings>
       </Button>
     </Buttons>
@@ -68,6 +79,8 @@
     <GuidSymbol name="guidLangCodeCmdSet" value="{7C4E1D82-3F5A-4B69-8C7D-9E0F1A2B3C4D}">
       <IDSymbol name="LangCodeMenuGroup" value="0x1020" />
       <IDSymbol name="LangCodeCodeWinGroup" value="0x1021" />
+      <IDSymbol name="LangCodeCodeWinSubMenu" value="0x1030" />
+      <IDSymbol name="LangCodeCodeWinSubMenuGroup" value="0x1031" />
       <IDSymbol name="OpenAgentToolWindowCommandId" value="0x0100" />
       <IDSymbol name="ExplainSelectionCommandId" value="0x0101" />
       <IDSymbol name="RefactorSelectionCommandId" value="0x0102" />

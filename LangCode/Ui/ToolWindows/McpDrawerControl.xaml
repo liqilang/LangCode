@@ -1,0 +1,243 @@
+<UserControl x:Class="LangCode.Ui.ToolWindows.McpDrawerControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="clr-namespace:LangCode.Ui.Primitive">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <!-- 调色板由 ThemeManager.Attach(this) 注入（随 VS 主题实时刷新） -->
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/LangCode;component/Ui/Theme/Controls.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Grid x:Name="Root"
+          Background="{DynamicResource Ap.BgElevated}">
+        <Grid.RenderTransform>
+            <TranslateTransform x:Name="Slide"
+                                X="0"/>
+        </Grid.RenderTransform>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- 抽屉头 -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource Ap.BgElevated}"
+                BorderBrush="{DynamicResource Ap.BorderSoft}"
+                BorderThickness="0,0,0,1">
+            <Grid Margin="6,0,8,0">
+                <Button x:Name="BtnBack"
+                        Style="{StaticResource IconButton}"
+                        HorizontalAlignment="Left"
+                        AutomationProperties.Name="返回"
+                        Click="Back_Click"
+                        ToolTip="返回">
+                    <ui:Icon IconName="chevron-left"
+                             Width="16"
+                             Height="16"/>
+                </Button>
+                <TextBlock Text="MCP 服务器"
+                           FontSize="13"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource Ap.FgBright}"
+                           VerticalAlignment="Center"
+                           Margin="34,0,0,0"/>
+            </Grid>
+        </Border>
+
+        <!-- 分页：已安装 / 市场  -->
+        <Border Grid.Row="1"
+                Background="{DynamicResource Ap.BgElevated}"
+                BorderBrush="{DynamicResource Ap.BorderSoft}"
+                BorderThickness="0,0,0,1"
+                Padding="12,8">
+            <StackPanel Orientation="Horizontal">
+                <RadioButton x:Name="TabInstalled"
+                             Style="{StaticResource TabButton}"
+                             GroupName="McpTabs"
+                             Tag="installed"
+                             IsChecked="True"
+                             Checked="Tab_Checked">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:Icon IconName="server"
+                                 Width="13"
+                                 Height="13"
+                                 VerticalAlignment="Center"/>
+                        <TextBlock Text="已安装"
+                                   Margin="5,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                    </StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="TabMarket"
+                             Style="{StaticResource TabButton}"
+                             GroupName="McpTabs"
+                             Tag="market"
+                             Margin="8,0,0,0"
+                             Checked="Tab_Checked">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:Icon IconName="search"
+                                 Width="13"
+                                 Height="13"
+                                 VerticalAlignment="Center"/>
+                        <TextBlock Text="市场"
+                                   Margin="5,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
+                    </StackPanel>
+                </RadioButton>
+            </StackPanel>
+        </Border>
+
+        <!-- 内容 -->
+        <Grid Grid.Row="2">
+
+            <!-- 已安装 -->
+            <ScrollViewer x:Name="InstalledPanel"
+                          VerticalScrollBarVisibility="Auto"
+                          Padding="14,12,14,16">
+                <StackPanel>
+                    <TextBlock Text="已连接的服务器"
+                               Style="{StaticResource TdSectionTitle}"
+                               Margin="0,0,0,9"/>
+
+                    <!--
+                        服务器列表数据化：条目来自 AppSettings.McpServers，
+                        行由 BuildMcpRows() 生成（可改名 / 改命令 / 启停 / 测试连接 / 删除 / 环境变量）
+                    -->
+                    <StackPanel x:Name="McpServerList"/>
+
+                    <TextBlock x:Name="McpEmptyHint"
+                               Text="还没有配置 MCP 服务器。点「浏览市场」一键安装，或「添加服务器」手填一条。"
+                               Style="{StaticResource TdFieldHint}"
+                               Margin="0,0,0,8"
+                               TextWrapping="Wrap"/>
+
+                    <Grid Margin="0,4,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0"
+                                Style="{StaticResource BtnPrimary}"
+                                Height="28"
+                                Click="McpAdd_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:Icon IconName="plus"
+                                         Width="12"
+                                         Height="12"
+                                         VerticalAlignment="Center"/>
+                                <TextBlock Text="添加服务器"
+                                           Margin="6,0,0,0"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ButtonBase}}"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="2"
+                                Style="{StaticResource BtnBase}"
+                                Height="28"
+                                Click="McpMarketShortcut_Click"
+                                ToolTip="切到「市场」分页">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:Icon IconName="search"
+                                         Width="12"
+                                         Height="12"
+                                         VerticalAlignment="Center"/>
+                                <TextBlock Text="浏览市场"
+                                           Margin="6,0,0,0"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"
+                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ButtonBase}}"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="4"
+                                Style="{StaticResource BtnBase}"
+                                Height="28"
+                                Content="导入配置"
+                                Click="McpImport_Click"
+                                ToolTip="从 JSON 粘贴导入服务器列表"/>
+                    </Grid>
+
+                    <TextBlock Text="全局选项"
+                               Style="{StaticResource TdSectionTitle}"
+                               Margin="0,18,0,9"/>
+
+                    <!-- 三个开关按代码生成（见 BuildGlobalOptions）：直接改「已生效」的设置 -->
+                    <StackPanel x:Name="McpGlobalOptions"/>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- 市场 -->
+            <Grid x:Name="MarketPanel"
+                  Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0"
+                      Margin="14,12,14,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="MCP 市场"
+                               Style="{StaticResource TdSectionTitle}"
+                               VerticalAlignment="Center"/>
+                    <TextBlock x:Name="McpMarketCount"
+                               Grid.Column="1"
+                               FontSize="11"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource Ap.FgFaint}"/>
+                </Grid>
+
+                <StackPanel Grid.Row="1"
+                            Margin="14,8,14,0">
+                    <Grid>
+                        <TextBox x:Name="McpMarketSearch"
+                                 Height="28"
+                                 FontSize="11.5"
+                                 VerticalContentAlignment="Center"
+                                 ToolTip="按名称 / 分类 / 说明搜索"
+                                 TextChanged="McpMarketSearch_TextChanged"/>
+                        <ui:Icon IconName="search"
+                                 Width="14"
+                                 Height="14"
+                                 Foreground="{DynamicResource Ap.FgFaint}"
+                                 HorizontalAlignment="Left"
+                                 VerticalAlignment="Center"
+                                 Margin="9,0,0,0"
+                                 IsHitTestVisible="False"/>
+                    </Grid>
+
+                    <!-- 分类筛选（由 BuildMcpMarketCategories 生成） -->
+                    <WrapPanel x:Name="McpMarketCategories"
+                               Margin="0,8,0,0"/>
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="2"
+                              VerticalScrollBarVisibility="Auto"
+                              Padding="14,8,14,0">
+                    <StackPanel x:Name="McpMarketList"/>
+                </ScrollViewer>
+
+                <TextBlock x:Name="McpMarketHint"
+                           Grid.Row="3"
+                           Style="{StaticResource TdFieldHint}"
+                           Margin="14,4,14,10"
+                           TextWrapping="Wrap"
+                           Visibility="Collapsed"/>
+            </Grid>
+        </Grid>
+    </Grid>
+</UserControl>

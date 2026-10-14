@@ -69,19 +69,39 @@ namespace LangCode.Ui.ToolWindows
         private readonly List<PendingEdit> _turnEdits = [];
 
         /// <summary>
-        /// 本轮因步数上限暂停 —— 请求条上出现「继续任务」
+        /// 本次会话里每个被改文件「改动前」的内容（第一次改到它时抓取）——
+        /// 「本次变更」里点击文件名时用它开 VS 差异对比。只驻留内存；
+        /// 重开会话后内存里没有基线，会退回用 git HEAD 里的版本
         /// </summary>
-        private bool _turnCanContinue;
+        private readonly Dictionary<string, string> _sessionBaselines = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
-        /// 本轮真的出错了（异常） —— 请求条上出现「重试」
+        /// 本轮因步数上限暂停 —— 请求条上出现「继续任务」。
+        /// 直接读写 <see cref="ChatSession.TurnPaused"/>：随会话一起落盘，重开 VS 后能恢复
         /// </summary>
-        private bool _turnCanRetry;
+        private bool _turnCanContinue
+        {
+            get { return _session.TurnPaused; }
+            set { _session.TurnPaused = value; }
+        }
 
         /// <summary>
-        /// 本轮是用户按「取消」中断的 —— 出现「恢复任务」（没出错，所以不叫重试）
+        /// 本轮真的出错了（异常） —— 请求条上出现「重试」（同样随会话落盘）
         /// </summary>
-        private bool _turnInterrupted;
+        private bool _turnCanRetry
+        {
+            get { return _session.TurnCanRetry; }
+            set { _session.TurnCanRetry = value; }
+        }
+
+        /// <summary>
+        /// 本轮是用户按「取消」中断的 —— 出现「恢复任务」（没出错，所以不叫重试；同样随会话落盘）
+        /// </summary>
+        private bool _turnInterrupted
+        {
+            get { return _session.TurnInterrupted; }
+            set { _session.TurnInterrupted = value; }
+        }
 
         /// <summary>
         /// 排队等待发送的任务（生成中也允许继续发，只是排队）
@@ -318,6 +338,11 @@ namespace LangCode.Ui.ToolWindows
             SettingsDrawer.Attach(_settings);
             SettingsDrawer.SettingsChanged += (_, __) => OnSettingsChanged();
 
+            // MCP 抽屉：独立的 MCP 视图（已安装 / 市场）；改的是「已生效」的设置，立即落盘
+            McpDrawer.CloseRequested += (_, __) => McpDrawer.Close();
+            McpDrawer.Attach(_settings);
+            McpDrawer.SettingsChanged += (_, __) => OnMcpChanged();
+
             // 启动时不再自动载入上次会话：先给一个主页（带「最近的会话」列表），
             // 由用户自己决定继续哪一个 —— 直接跳进去会让人分不清「这是新任务还是旧任务」
             _session.ReloadHistory();
@@ -537,6 +562,15 @@ namespace LangCode.Ui.ToolWindows
             // 计划 / 执行模式（输入框下方的两个芯片，互斥）
             PlanChip.IsChecked = _settings.PlanMode;
             ActChip.IsChecked = !_settings.PlanMode;
+        }
+
+        /// <summary>
+        /// MCP 配置被改动：立即落盘，并让连接池与新配置对齐（停用 / 删除的会被关掉）
+        /// </summary>
+        private void OnMcpChanged()
+        {
+            SettingsStore.Save(_settings);
+            McpManager.Sync(_settings.McpServers);
         }
 
         /// <summary>

@@ -17,6 +17,7 @@ namespace LangCode.Ui.ToolWindows
         private void BtnHistory_Click(object sender, RoutedEventArgs e)
         {
             SettingsDrawer.Close();
+            McpDrawer.Close();
 
             // 打开前重新读一次盘，并同步「正在查看」的高亮
             _session.ReloadHistory();
@@ -27,13 +28,14 @@ namespace LangCode.Ui.ToolWindows
         private void BtnMcp_Click(object sender, RoutedEventArgs e)
         {
             HistoryDrawer.Close();
-            SettingsDrawer.Open();
-            SettingsDrawer.SelectTab("mcp");
+            SettingsDrawer.Close();
+            McpDrawer.Open();
         }
 
         private void BtnSettings_Click(object sender, RoutedEventArgs e)
         {
             HistoryDrawer.Close();
+            McpDrawer.Close();
             SettingsDrawer.Open();
             SettingsDrawer.SelectTab("general");
         }
@@ -98,7 +100,7 @@ namespace LangCode.Ui.ToolWindows
         }
 
         /// <summary>
-        /// 「本次变更」摘要里点击文件名 → 在 VS 里打开
+        /// 「本次变更」摘要里点击文件名 → 在 VS 里打开**差异对比**（改动前 vs 现在）
         /// </summary>
         private void SummaryPath_Click(object sender, MouseButtonEventArgs e)
         {
@@ -115,6 +117,22 @@ namespace LangCode.Ui.ToolWindows
             }
 
             e.Handled = true;
+
+            // ① 优先用本次会话抓到的「改动前」内容开差异对比
+            if (_sessionBaselines.TryGetValue(change.Path, out var baseline) &&
+                VsFileOpener.TryOpenDiff(baseline, absolute))
+            {
+                return;
+            }
+
+            // ② 重开会话后内存里的基线没了：退而用 git HEAD 里的版本作基线
+            var head = GitWorkspace.TryReadHeadContent(_workspace?.Root, change.Path);
+            if (head != null && VsFileOpener.TryOpenDiff(head, absolute))
+            {
+                return;
+            }
+
+            // ③ 实在拿不到基线（不是 git 仓库 / 新文件）：至少把文件打开
             VsFileOpener.TryOpenFile(absolute, 0);
         }
 

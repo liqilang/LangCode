@@ -81,6 +81,11 @@ namespace LangCode.Ui.ToolWindows
             ScrollToEnd();
             UpdateTokens();
 
+            // 「突然中断」保险丝：先把「任务进行中」落盘。若 VS 被强杀来不及走收尾，
+            // 下次打开该会话时就能据此恢复「继续任务」
+            _session.TurnInProgress = true;
+            _session.SaveCurrent(_settings);
+
             var assistant = _session.BeginAssistantMessage(_settings.Model);
 
             // 拿不到工作区就明确告诉用户「本轮是纯对话」，而不是静默地什么都不做
@@ -101,6 +106,13 @@ namespace LangCode.Ui.ToolWindows
 
             _cts = new CancellationTokenSource();
             var backend = ChatBackendFactory.Create(_settings);
+
+            // 接近上下文上限时，先用一次模型调用把较早的中间段压成结构化摘要，
+            // 而不是直接丢弃 —— 避免模型丢上下文后反复重读文件；本身未达阈值时是空操作
+            await _session
+                .CompactIfNeededAsync(backend, _settings, _cts.Token)
+                .ConfigureAwait(true);
+
             var turns = _session.BuildTurns();
 
             // 自动上下文：把「当前文件 / 选中代码 / 编译诊断」附在这一轮请求里
@@ -169,6 +181,8 @@ namespace LangCode.Ui.ToolWindows
                 UpdateTokens();
                 ScrollToEnd();
 
+                // 收尾：任务不再「进行中」；随后照常落盘（写入最终的继续 / 恢复 / 重试状态）
+                _session.TurnInProgress = false;
                 _session.SaveCurrent(_settings);
 
                 // 长任务（改过文件 / 撞到上限 / 出错 / 产生多张卡片）结束时提示一声：
@@ -294,6 +308,9 @@ namespace LangCode.Ui.ToolWindows
                         UpdateTokens();
                         RefreshRequestBar();
                         ScrollToEnd();
+
+                        // 立刻落盘：这个回调经 Dispatcher 异步派发，可能晚于本轮收尾的那次保存
+                        _session.SaveCurrent(_settings);
                     }),
                     DispatcherPriority.Background),
 
@@ -307,6 +324,14 @@ namespace LangCode.Ui.ToolWindows
                         if (edit != null)
                         {
                             _turnEdits.Add(edit);
+
+                            // 第一次改到某个文件时，记下它「改动前」的内容：
+                            // 「本次变更」里点击文件名时要用它开 VS 差异对比
+                            if (!string.IsNullOrWhiteSpace(edit.RelativePath) &&
+                                !_sessionBaselines.ContainsKey(edit.RelativePath))
+                            {
+                                _sessionBaselines[edit.RelativePath] = edit.OriginalText ?? string.Empty;
+                            }
 
                             // 「本次变更」摘要：把这一次真正落盘的改动按文件累计下来
                             //（增删行数取自 diff 行），会话结束时一眼看清动过哪些文件

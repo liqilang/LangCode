@@ -140,6 +140,23 @@ namespace LangCode.Workspace
                 : "最近的提交（git log）：\n" + output.TrimEnd();
         }
 
+        /// <summary>
+        /// 读取某文件在 HEAD 提交里的内容（用于「与改动前对比」）。
+        /// 不是 git 仓库 / 该文件未跟踪时返回 null。
+        /// </summary>
+        public static string TryReadHeadContent(string root, string relativePath)
+        {
+            if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(relativePath))
+            {
+                return null;
+            }
+
+            var path = relativePath.Replace('\\', '/').TrimStart('/');
+
+            // 整个 "HEAD:path" 作为一个带引号的参数，路径含空格也能正确解析
+            return RunGit(root, "show \"HEAD:" + path + "\"");
+        }
+
         private static string RunGit(string root, string arguments)
         {
             if (string.IsNullOrWhiteSpace(root))

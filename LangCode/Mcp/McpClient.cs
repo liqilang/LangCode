@@ -35,6 +35,11 @@ namespace LangCode.Mcp
         private readonly string _command;
         private readonly string _arguments;
         private readonly string _workingDirectory;
+
+        /// <summary>
+        /// 启动子进程时注入的环境变量（API Key / Token 等；空值不注入）
+        /// </summary>
+        private readonly IReadOnlyDictionary<string, string> _environment;
         private readonly object _gate = new object();
         private readonly Dictionary<int, TaskCompletionSource<string>> _pending =
             [];
@@ -43,23 +48,76 @@ namespace LangCode.Mcp
         private StreamWriter _stdin;
         private int _nextId;
 
-        public McpClient(string name, string command, string arguments, string workingDirectory)
+        /// <summary>
+        /// 子进程 stderr 的尾部（进程启动失败 / 提前退出时用来解释「为什么连不上」）
+        /// </summary>
+        private readonly StringBuilder _stderr = new StringBuilder();
+
+        /// <summary>
+        /// 主动关闭（Dispose）标记：据此避免退出事件覆盖掉真正的失败原因
+        /// </summary>
+        private volatile bool _disposed;
+
+        /// <summary>
+        /// 保留的 stderr 字符上限（只留尾部，防止超长日志占用内存）
+        /// </summary>
+        private const int MaxStderrChars = 4000;
+
+        public McpClient(
+            string name,
+            string command,
+            string arguments,
+            string workingDirectory,
+            IReadOnlyDictionary<string, string> environment = null)
         {
             _name = name ?? string.Empty;
             _command = command ?? string.Empty;
             _arguments = arguments ?? string.Empty;
             _workingDirectory = workingDirectory ?? string.Empty;
+            _environment = environment;
         }
 
         public string Name => _name;
 
         /// <summary>
-        /// 已建连接的配置是否与给定命令 / 参数一致（不一致就要重建进程）
+        /// 已建连接的配置是否与给定命令 / 参数 / 环境变量一致（不一致就要重建进程）
         /// </summary>
-        public bool Matches(string command, string arguments)
+        public bool Matches(string command, string arguments, IReadOnlyDictionary<string, string> environment = null)
         {
-            return string.Equals(_command, command ?? string.Empty, StringComparison.Ordinal) &&
-                   string.Equals(_arguments, arguments ?? string.Empty, StringComparison.Ordinal);
+            if (!string.Equals(_command, command ?? string.Empty, StringComparison.Ordinal) ||
+                !string.Equals(_arguments, arguments ?? string.Empty, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return SameEnvironment(_environment, environment);
+        }
+
+        /// <summary>
+        /// 两份环境变量是否一致（按非空项比较）
+        /// </summary>
+        private static bool SameEnvironment(
+            IReadOnlyDictionary<string, string> left,
+            IReadOnlyDictionary<string, string> right)
+        {
+            var first = left ?? new Dictionary<string, string>();
+            var second = right ?? new Dictionary<string, string>();
+
+            if (first.Count != second.Count)
+            {
+                return false;
+            }
+
+            foreach (var pair in first)
+            {
+                if (!second.TryGetValue(pair.Key, out var value) ||
+                    !string.Equals(pair.Value, value, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -139,7 +197,8 @@ namespace LangCode.Mcp
             }
             catch (Exception ex)
             {
-                Status = "连接失败：" + ex.Message;
+                // 优先给出「进程为什么起不来」：这是最常见的失败（命令不存在 / 参数不对）
+                Status = ExplainFailure("连接失败：" + ex.Message);
                 Dispose();
                 return false;
             }
@@ -207,6 +266,23 @@ namespace LangCode.Mcp
         {
             IsConnected = false;
 
+            // 先放行所有等待中的请求（无论是不是主动关闭）
+            lock (_gate)
+            {
+                foreach (var pending in _pending.Values)
+                {
+                    pending.TrySetResult(null);
+                }
+
+                _pending.Clear();
+            }
+
+            // 主动 Dispose 触发的退出：不要覆盖掉已有的状态（那多半是更有用的失败原因）
+            if (_disposed)
+            {
+                return;
+            }
+
             var code = -1;
             try
             {
@@ -217,22 +293,16 @@ namespace LangCode.Mcp
                 // 拿不到退出码不影响后续处理
             }
 
-            Status = "进程已退出（code " + code + "）";
-
-            lock (_gate)
-            {
-                foreach (var pending in _pending.Values)
-                {
-                    pending.TrySetResult(null);
-                }
-
-                _pending.Clear();
-            }
+            // 带上 stderr 尾部：进程一起来就退出时，真正的原因往往就在这里
+            var error = StderrTail();
+            Status = "进程已退出（code " + code + "）" +
+                     (string.IsNullOrEmpty(error) ? string.Empty : "：" + error);
         }
 
         public void Dispose()
         {
             IsConnected = false;
+            _disposed = true;
 
             try
             {
@@ -299,6 +369,27 @@ namespace LangCode.Mcp
                 startInfo.WorkingDirectory = _workingDirectory;
             }
 
+            // 注入环境变量（API Key 等）；空值不注入，避免把空 Token 传给服务器
+            if (_environment != null)
+            {
+                foreach (var pair in _environment)
+                {
+                    if (string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrEmpty(pair.Value))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        startInfo.EnvironmentVariables[pair.Key] = pair.Value;
+                    }
+                    catch (Exception)
+                    {
+                        // 变量名非法：跳过，不影响启动
+                    }
+                }
+            }
+
             _process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             _process.Exited += OnProcessExited;
             _process.Start();
@@ -313,8 +404,8 @@ namespace LangCode.Mcp
             // 后台读循环：按 id 把响应派发给等待中的请求
             Task.Run(() => ReadLoop(_process.StandardOutput));
 
-            // stderr 也必须读掉，否则管道满了会卡住子进程
-            Task.Run(() => Drain(_process.StandardError));
+            // stderr 也必须读掉（否则管道满了会卡住子进程），同时留存尾部用于诊断
+            Task.Run(() => DrainError(_process.StandardError));
         }
 
         private void ReadLoop(StreamReader reader)
@@ -350,19 +441,66 @@ namespace LangCode.Mcp
             }
         }
 
-        private static void Drain(StreamReader reader)
+        /// <summary>
+        /// 读掉 stderr（否则管道满了会卡住子进程），并把尾部内容留存下来用于诊断
+        /// </summary>
+        private void DrainError(StreamReader reader)
         {
             try
             {
-                while (reader.ReadLine() != null)
+                string line;
+                while ((line = reader.ReadLine()) != null)
                 {
-                    // 丢弃 stderr（服务器日志），但必须读完
+                    lock (_gate)
+                    {
+                        _stderr.AppendLine(line);
+
+                        // 只留尾部：MCP 服务器可能刷很多日志
+                        if (_stderr.Length > MaxStderrChars)
+                        {
+                            _stderr.Remove(0, _stderr.Length - MaxStderrChars);
+                        }
+                    }
                 }
             }
             catch (Exception)
             {
                 // 忽略
             }
+        }
+
+        /// <summary>
+        /// stderr 的尾部内容（空表示子进程没有输出任何东西）
+        /// </summary>
+        private string StderrTail()
+        {
+            lock (_gate)
+            {
+                return _stderr.Length == 0 ? string.Empty : _stderr.ToString().Trim();
+            }
+        }
+
+        /// <summary>
+        /// 把「为什么连不上」拼成可读的诊断文本：优先给出进程自己吐出来的错误
+        /// </summary>
+        private string ExplainFailure(string reason)
+        {
+            var command = _command + (_arguments.Length == 0 ? string.Empty : " " + _arguments);
+            var error = StderrTail();
+
+            return string.IsNullOrEmpty(error)
+                ? reason + "\n启动命令：" + command +
+                  "\n（进程没有输出任何错误信息：通常是命令不存在或参数不对——可在终端里手动执行上面这条命令确认）"
+                : reason + "\n启动命令：" + command + "\n进程错误输出：\n" + error;
+        }
+
+        /// <summary>
+        /// 追加到异常信息里的 stderr 摘要（没有输出时返回空串）
+        /// </summary>
+        private string DescribeStderr()
+        {
+            var error = StderrTail();
+            return string.IsNullOrEmpty(error) ? string.Empty : "\n进程错误输出：\n" + error;
         }
 
         private async Task<string> SendAsync(string method, string parameters, CancellationToken cancellationToken)
@@ -389,7 +527,7 @@ namespace LangCode.Mcp
                     _pending.Remove(id);
                 }
 
-                throw new InvalidOperationException("写入 MCP 进程失败：" + ex.Message, ex);
+                throw new InvalidOperationException("写入 MCP 进程失败：" + ex.Message + DescribeStderr(), ex);
             }
 
             var timeout = Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);

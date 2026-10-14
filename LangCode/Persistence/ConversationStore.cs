@@ -55,6 +55,26 @@ namespace LangCode.Persistence
     }
 
     /// <summary>
+    /// 落盘的一条「本次会话改动过的文件」（「本次变更」摘要的一行）
+    /// </summary>
+    [DataContract(Name = "change")]
+    public sealed class StoredChange
+    {
+        /// <summary>add / mod / del</summary>
+        [DataMember(Name = "kind", Order = 1)]
+        public string Kind { get; set; } = "mod";
+
+        [DataMember(Name = "path", Order = 2)]
+        public string Path { get; set; } = string.Empty;
+
+        [DataMember(Name = "added", Order = 3)]
+        public int Added { get; set; }
+
+        [DataMember(Name = "deleted", Order = 4)]
+        public int Deleted { get; set; }
+    }
+
+    /// <summary>
     /// 落盘的会话记录
     /// </summary>
     [DataContract(Name = "conversation")]
@@ -84,6 +104,25 @@ namespace LangCode.Persistence
 
         [DataMember(Name = "messages", Order = 7)]
         public List<StoredMessage> Messages { get; set; } = [];
+
+        /// <summary>
+        /// 该会话的任务处于「可继续」状态（步数上限暂停，或运行中被强杀）。
+        /// 重开 VS 载入会话时据此恢复请求条上的「继续任务」。
+        /// </summary>
+        [DataMember(Name = "paused", Order = 8)]
+        public bool Paused { get; set; }
+
+        /// <summary>任务被用户中断（恢复时显示「恢复任务」）</summary>
+        [DataMember(Name = "interrupted", Order = 9)]
+        public bool Interrupted { get; set; }
+
+        /// <summary>任务真的出错（恢复时显示「重试」）</summary>
+        [DataMember(Name = "canRetry", Order = 10)]
+        public bool CanRetry { get; set; }
+
+        /// <summary>本次会话改动过的文件（「本次变更」摘要）</summary>
+        [DataMember(Name = "changes", Order = 11)]
+        public List<StoredChange> Changes { get; set; } = [];
     }
 
     /// <summary>
@@ -351,7 +390,14 @@ namespace LangCode.Persistence
         /// <summary>
         /// 把运行时消息序列化成可落盘的会话（标题 / 摘要取首条用户消息）
         /// </summary>
-        public static StoredConversation Snapshot(string id, string model, IEnumerable<ChatMessage> messages)
+        public static StoredConversation Snapshot(
+            string id,
+            string model,
+            IEnumerable<ChatMessage> messages,
+            IEnumerable<SessionChange> changes = null,
+            bool paused = false,
+            bool interrupted = false,
+            bool canRetry = false)
         {
             var list = (messages ?? Enumerable.Empty<ChatMessage>()).ToList();
             var firstUser = list.FirstOrDefault(m => m.IsUser);
@@ -365,7 +411,61 @@ namespace LangCode.Persistence
                 UpdatedUtc = DateTime.UtcNow,
                 MessageCount = list.Count,
                 Messages = list.Select(ToStoredMessage).ToList(),
+
+                // 任务状态 + 本次变更：重开 VS 后据此恢复「继续任务」与「本次变更」摘要
+                Paused = paused,
+                Interrupted = interrupted,
+                CanRetry = canRetry,
+                Changes = (changes ?? Enumerable.Empty<SessionChange>())
+                    .Where(c => c != null && !string.IsNullOrWhiteSpace(c.Path))
+                    .Select(ToStoredChange)
+                    .ToList(),
             };
+        }
+
+        private static StoredChange ToStoredChange(SessionChange change)
+        {
+            return new StoredChange
+            {
+                Kind = change.Kind == SessionChangeKind.Add ? "add"
+                    : change.Kind == SessionChangeKind.Delete ? "del"
+                    : "mod",
+                Path = change.Path ?? string.Empty,
+                Added = change.Added,
+                Deleted = change.Deleted,
+            };
+        }
+
+        /// <summary>
+        /// 把落盘会话里的「本次变更」还原成运行时集合
+        /// </summary>
+        public static List<SessionChange> ToSessionChanges(StoredConversation conversation)
+        {
+            var result = new List<SessionChange>();
+            if (conversation?.Changes == null)
+            {
+                return result;
+            }
+
+            foreach (var stored in conversation.Changes)
+            {
+                if (stored == null || string.IsNullOrWhiteSpace(stored.Path))
+                {
+                    continue;
+                }
+
+                result.Add(new SessionChange
+                {
+                    Kind = string.Equals(stored.Kind, "add", StringComparison.OrdinalIgnoreCase) ? SessionChangeKind.Add
+                        : string.Equals(stored.Kind, "del", StringComparison.OrdinalIgnoreCase) ? SessionChangeKind.Delete
+                        : SessionChangeKind.Modify,
+                    Path = stored.Path,
+                    Added = stored.Added,
+                    Deleted = stored.Deleted,
+                });
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -486,6 +586,9 @@ namespace LangCode.Persistence
                     ? source.MessageCount
                     : (source.Messages?.Count ?? 0),
                 Messages = [],
+
+                // 索引只留元数据，但「可继续」值得带上：历史列表将来可据此标记未完成任务
+                Paused = source.Paused,
             };
         }
 

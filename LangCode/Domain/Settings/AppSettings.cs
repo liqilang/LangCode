@@ -846,6 +846,15 @@ namespace LangCode.Domain.Settings
 
             McpServers ??= [];
 
+            // 每个服务器的环境变量字典补齐（旧设置里没有这个字段）
+            foreach (var server in McpServers)
+            {
+                if (server != null)
+                {
+                    server.Environment ??= [];
+                }
+            }
+
             CustomInstructions ??= string.Empty;
             AutoCompactThreshold = Fallback(AutoCompactThreshold, defaults.AutoCompactThreshold);
             MaxFilesPerRead = MaxFilesPerRead <= 0 ? defaults.MaxFilesPerRead : MaxFilesPerRead;
@@ -924,7 +933,7 @@ namespace LangCode.Domain.Settings
             RateLimit = source.RateLimit;
             AutoRetry = source.AutoRetry;
 
-            McpServers = [.. source.McpServers ?? []];
+            McpServers = (source.McpServers ?? []).Select(s => s.Clone()).ToList();
             AutoConnectMcp = source.AutoConnectMcp;
             ConfirmMcpTools = source.ConfirmMcpTools;
             LogMcpCalls = source.LogMcpCalls;
@@ -1012,7 +1021,7 @@ namespace LangCode.Domain.Settings
                 TopP = TopP,
                 RateLimit = RateLimit,
                 AutoRetry = AutoRetry,
-                McpServers = [.. McpServers ?? []],
+                McpServers = (McpServers ?? []).Select(s => s.Clone()).ToList(),
                 AutoConnectMcp = AutoConnectMcp,
                 ConfirmMcpTools = ConfirmMcpTools,
                 LogMcpCalls = LogMcpCalls,
@@ -1083,6 +1092,13 @@ namespace LangCode.Domain.Settings
         public bool Enabled { get; set; } = true;
 
         /// <summary>
+        /// 启动该服务器时注入的环境变量（API Key / Token 等）。
+        /// 值为空串的项**不会**被注入（市场条目会先写入空占位，等用户填写）。
+        /// </summary>
+        [DataMember(Name = "environment", Order = 5)]
+        public Dictionary<string, string> Environment { get; set; } = [];
+
+        /// <summary>
         /// 连接后拿到的工具数量（运行时填充，不持久化）
         /// </summary>
         [IgnoreDataMember]
@@ -1099,6 +1115,21 @@ namespace LangCode.Domain.Settings
         /// </summary>
         [IgnoreDataMember]
         public string StatusText { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 深拷贝（AppSettings 的 Clone / CopyFrom 用：避免两个实例共享同一个 Environment 字典）
+        /// </summary>
+        public McpServerSettings Clone()
+        {
+            return new McpServerSettings
+            {
+                Name = Name,
+                Command = Command,
+                Arguments = Arguments,
+                Enabled = Enabled,
+                Environment = new Dictionary<string, string>(Environment ?? []),
+            };
+        }
     }
 }
 

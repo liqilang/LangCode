@@ -198,23 +198,6 @@
                                        Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
                         </StackPanel>
                     </RadioButton>
-                    <RadioButton x:Name="TabMcp"
-                                 Style="{StaticResource TabButton}"
-                                 Margin="0,0,0,10"
-                                 GroupName="LangCodeSettingsTabs"
-                                 Tag="mcp"
-                                 Checked="Tab_Checked">
-                        <StackPanel Orientation="Horizontal">
-                            <ui:Icon IconName="server"
-                                     Width="13"
-                                     Height="13"
-                                     VerticalAlignment="Center"/>
-                            <TextBlock Text="MCP"
-                                       Margin="5,0,0,0"
-                                       VerticalAlignment="Center"
-                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
-                        </StackPanel>
-                    </RadioButton>
                     <!--
                         「高级」不再是一页塞到底：编辑器 / 自动化 / 能力 / 上下文 / 数据 各占一页，
                         设置项再多也不会堆在同一块滚动区里找不着
@@ -825,122 +808,7 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <!-- ══════ MCP ══════ -->
-                    <StackPanel x:Name="McpPanel"
-                                Visibility="Collapsed">
-                        <StackPanel Margin="0,0,0,22">
-                            <TextBlock Text="已连接的服务器"
-                                       Style="{StaticResource TdSectionTitle}"
-                                       Margin="0,0,0,9"/>
 
-                            <!--
-                            服务器列表数据化：条目来自 AppSettings.McpServers，
-                            行由 BuildMcpRows() 生成（可改名 / 改命令 / 启停 / 测试连接 / 删除）
-                        -->
-                            <StackPanel x:Name="McpServerList"/>
-
-                            <TextBlock x:Name="McpEmptyHint"
-                                       Text="还没有配置 MCP 服务器点下面的「添加服务器」填一条，或在 mcpServers 里写好再用「导入配置」"
-                                       Style="{StaticResource TdFieldHint}"
-                                       Margin="0,0,0,8"
-                                       TextWrapping="Wrap"/>
-
-
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="8"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Button Grid.Column="0"
-                                        Style="{StaticResource BtnPrimary}"
-                                        Height="28"
-                                        Click="McpAdd_Click">
-                                    <StackPanel Orientation="Horizontal">
-                                        <ui:Icon IconName="plus"
-                                                 Width="12"
-                                                 Height="12"
-                                                 VerticalAlignment="Center"/>
-                                        <TextBlock Text="添加服务器"
-                                                   Margin="6,0,0,0"
-                                                   FontSize="12"
-                                                   VerticalAlignment="Center"
-                                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ButtonBase}}"/>
-                                    </StackPanel>
-                                </Button>
-                                <Button Grid.Column="2"
-                                        Style="{StaticResource BtnBase}"
-                                        Height="28"
-                                        Content="导入配置"
-                                        Click="McpImport_Click"
-                                        ToolTip="从 JSON 粘贴导入服务器列表"/>
-                            </Grid>
-                        </StackPanel>
-
-                        <StackPanel>
-                            <TextBlock Text="全局选项"
-                                       Style="{StaticResource TdSectionTitle}"
-                                       Margin="0,0,0,9"/>
-
-                            <Grid Margin="0,9,0,9">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0"
-                                            Margin="0,0,10,0">
-                                    <TextBlock Text="启动时自动连接"
-                                               Style="{StaticResource TdToggleName}"/>
-                                    <TextBlock Text="打开 LangCode 时自动连接所有已启用的 MCP 服务器"
-                                               Style="{StaticResource TdToggleDesc}"/>
-                                </StackPanel>
-                                <ToggleButton Grid.Column="1"
-                                              Style="{StaticResource Switch}"
-                                              Tag="AutoConnectMcp"
-                                              IsChecked="True"
-                                              Click="Switch_Click"
-                                              VerticalAlignment="Center"/>
-                            </Grid>
-
-                            <Grid Margin="0,9,0,9">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0"
-                                            Margin="0,0,10,0">
-                                    <TextBlock Text="工具调用需确认"
-                                               Style="{StaticResource TdToggleName}"/>
-                                    <TextBlock Text="每次调用 MCP 工具前弹出确认提示"
-                                               Style="{StaticResource TdToggleDesc}"/>
-                                </StackPanel>
-                                <ToggleButton Grid.Column="1"
-                                              Style="{StaticResource Switch}"
-                                              Tag="ConfirmMcpTools"
-                                              IsChecked="False"
-                                              Click="Switch_Click"
-                                              VerticalAlignment="Center"/>
-                            </Grid>
-
-                            <Grid Margin="0,9,0,9">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0"
-                                            Margin="0,0,10,0">
-                                    <TextBlock Text="记录工具调用日志"
-                                               Style="{StaticResource TdToggleName}"/>
-                                    <TextBlock Text="在输出面板中保留完整的 MCP 通信记录"
-                                               Style="{StaticResource TdToggleDesc}"/>
-                                </StackPanel>
-                                <ToggleButton Grid.Column="1"
-                                              Style="{StaticResource Switch}"
-                                              IsChecked="True"
-                                              VerticalAlignment="Center"/>
-                            </Grid>
-                        </StackPanel>
-                    </StackPanel>
 
                     <!-- ══════ 编辑器 ══════ -->
                     <StackPanel x:Name="EditorPanel"

@@ -7,6 +7,8 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace LangCode.Chat
 {
@@ -181,6 +183,29 @@ namespace LangCode.Chat
             SessionChanges.Clear();
         }
 
+        // ==================== 任务状态（随会话落盘，重开 VS 后恢复） ====================
+
+        /// <summary>
+        /// 本轮任务因步数上限被暂停（请求条显示「继续任务」）
+        /// </summary>
+        public bool TurnPaused { get; set; }
+
+        /// <summary>
+        /// 本轮任务被用户中断（请求条显示「恢复任务」）
+        /// </summary>
+        public bool TurnInterrupted { get; set; }
+
+        /// <summary>
+        /// 本轮任务真的出错（请求条显示「重试」）
+        /// </summary>
+        public bool TurnCanRetry { get; set; }
+
+        /// <summary>
+        /// 本轮任务正在运行。它是「突然中断」的保险丝：VS 被强杀时来不及走收尾，
+        /// 只要这个标记为真，下次打开该会话就会当成「可继续」
+        /// </summary>
+        public bool TurnInProgress { get; set; }
+
         public string CurrentModel
         {
             get { return _currentModel; }
@@ -193,16 +218,18 @@ namespace LangCode.Chat
             set { Set(ref _contextWindow, value <= 0 ? 200000 : value); }
         }
 
-        private int _compactThresholdPercent = 80;
+        private int _compactThresholdPercent = 60;
 
         /// <summary>
         /// 历史折叠阈值（百分比，设置页的「自动压缩阈值」）
-        /// 上下文估算超过它时，<see cref="BuildTurns"/> 会把较早的轮次折叠掉
+        /// 上下文估算超过它时，<see cref="CompactIfNeededAsync"/> 会把较早的轮次折叠掉。
+        /// 默认 60：与设置默认值（<see cref="AppSettings.AutoCompactThreshold"/>）一致，
+        /// 宁可早一点总结，也别攒到快顶爆时才被迫丢信息
         /// </summary>
         public int CompactThresholdPercent
         {
             get { return _compactThresholdPercent; }
-            set { _compactThresholdPercent = value <= 0 ? 80 : Math.Min(100, value); }
+            set { _compactThresholdPercent = value <= 0 ? 60 : Math.Min(100, value); }
         }
 
         public bool IsBusy
@@ -617,8 +644,12 @@ namespace LangCode.Chat
             switch (block.Kind)
             {
                 case ChatBlockKind.Text:
-                case ChatBlockKind.CodeCard:
                     return block.Text;
+
+                case ChatBlockKind.CodeCard:
+                    // 代码卡存的是工具结果的**全文**（读文件 / 命令输出等）。跨轮次重发前必须走
+                    // 与单轮回灌相同的截断口径，否则 ShrinkToolResult 的努力会在下一回合被 BuildTurns 整段绕过
+                    return ToolOutputTrimmer.Shrink(block.Text);
 
                 case ChatBlockKind.Todo:
                     // 清单不在 Text 里，而是 Todos 集合 —— 用 Render 还原成 [ ]/[-]/[x] 文本
@@ -719,6 +750,12 @@ namespace LangCode.Chat
 
             // 新会话 = 空白的「本次变更」：上一会话改动过哪些文件与这里无关
             ClearSessionChanges();
+
+            // 任务状态也一并清空，避免把上一会话的「继续任务」带过来
+            TurnPaused = false;
+            TurnInterrupted = false;
+            TurnCanRetry = false;
+            TurnInProgress = false;
         }
 
         /// <summary>
@@ -750,8 +787,17 @@ namespace LangCode.Chat
                 return;
             }
 
-            // 只写当前这一个会话文件 + 更新索引：不再把全部会话读进来再整体重写
-            var snapshot = ConversationStore.Snapshot(ConversationId, CurrentModel, Messages);
+            // 只写当前这一个会话文件 + 更新索引：不再把全部会话读进来再整体重写。
+            // 任务状态与「本次变更」一并落盘 —— 重开 VS 后要能恢复「继续任务」与变更摘要
+            var snapshot = ConversationStore.Snapshot(
+                ConversationId,
+                CurrentModel,
+                Messages,
+                SessionChanges,
+                paused: TurnPaused || TurnInProgress,
+                interrupted: TurnInterrupted,
+                canRetry: TurnCanRetry);
+
             ConversationStore.SaveConversation(snapshot, MaxHistoryItems);
             ReloadHistory();
         }
@@ -795,15 +841,48 @@ namespace LangCode.Chat
             }
 
             ReplaceMessages(ConversationStore.ToMessages(stored));
+
+            // 恢复任务状态（继续 / 恢复 / 重试）与「本次变更」摘要
+            TurnPaused = stored.Paused;
+            TurnInterrupted = stored.Interrupted;
+            TurnCanRetry = stored.CanRetry;
+            TurnInProgress = false;
+
+            SessionChanges.Clear();
+            foreach (var change in ConversationStore.ToSessionChanges(stored))
+            {
+                SessionChanges.Add(change);
+            }
+
             return true;
         }
 
         /// <summary>
-        /// 手动压缩上下文：保留首条用户提示词与最近 <paramref name="keepRecent"/> 条消息，
-        /// 把中间较早的对话合并成一条说明，立即释放上下文占用
+        /// 接近上下文上限时自动压缩（总结式）：未达阈值则什么都不做。
         /// </summary>
-        /// <returns>被折叠掉的消息条数（0 表示没有可压缩的内容）</returns>
-        public int CompactNow(int keepRecent = 6)
+        /// <returns>被折叠掉的消息条数（0 表示没有压缩）</returns>
+        public async Task<int> CompactIfNeededAsync(IChatBackend backend, AppSettings settings, CancellationToken cancellationToken, int keepRecent = 8)
+        {
+            if (ContextWindow <= 0)
+            {
+                return 0;
+            }
+
+            var threshold = Math.Max(10, Math.Min(100, _compactThresholdPercent));
+            var budget = ContextWindow * (threshold / 100.0);
+            if (EstimateTokens().Used <= budget)
+            {
+                return 0;
+            }
+
+            return await CompactAsync(backend, settings, cancellationToken, keepRecent).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 压缩上下文（总结式）：保留首条用户提示词（任务锚点）与最近 <paramref name="keepRecent"/> 条消息，
+        /// 把中间较早的对话交给模型压成一段结构化摘要 
+        /// </summary> 
+        public async Task<int> CompactAsync(IChatBackend backend, AppSettings settings, CancellationToken cancellationToken, int keepRecent = 6)
         {
             if (keepRecent < 1)
             {
@@ -821,29 +900,105 @@ namespace LangCode.Chat
                 }
             }
 
-            var keepFrom = Math.Max(0, Messages.Count - keepRecent);
-
-            // 没有首条提示词，或最近的消息已经紧挨着它：没有可折叠的中间段
-            if (firstUserIndex < 0 || keepFrom <= firstUserIndex + 1)
+            if (firstUserIndex < 0)
             {
                 return 0;
             }
 
-            var removed = keepFrom - (firstUserIndex + 1);
+            // 冻结段 = 首条提示词之后、连续排列的「历史摘要块」；压缩只从它们**之后**开始折叠，
+            // 已有摘要一个都不动 —— 这是前缀稳定（缓存可命中）的前提
+            var frozenEnd = firstUserIndex + 1;
+            while (frozenEnd < Messages.Count && IsSummaryMessage(Messages[frozenEnd]))
+            {
+                frozenEnd++;
+            }
 
-            for (var i = keepFrom - 1; i > firstUserIndex; i--)
+            var keepFrom = Math.Max(0, Messages.Count - keepRecent);
+
+            // 没有可折叠的中间段（最近的消息已经紧挨着冻结段）
+            if (keepFrom <= frozenEnd)
+            {
+                return 0;
+            }
+
+            var removed = keepFrom - frozenEnd;
+
+            // 收集被折叠段，交给模型总结（失败 / 太短则退回固定说明）
+            var dropped = new List<ChatTurn>(removed);
+            for (var i = frozenEnd; i < keepFrom; i++)
+            {
+                dropped.Add(ToTurn(Messages[i]));
+            }
+
+            string summary = null;
+            if (backend != null)
+            {
+                try
+                {
+                    summary = await ContextSummarizer
+                        .SummarizeAsync(backend, settings, dropped, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception)
+                {
+                    summary = null;
+                }
+            }
+
+            summary = string.IsNullOrWhiteSpace(summary)
+                ? "（已压缩较早的 " + removed + " 条对话以释放上下文；需要其中细节时，请让我重新读取相关文件）"
+                : SummaryMarker + "（已压缩较早的 " + removed + " 条对话，以下为要点）\n" + summary.Trim();
+
+            // 就地替换被折叠段为**一条摘要消息**（放在冻结段之后，前缀一字未动）
+            for (var i = keepFrom - 1; i >= frozenEnd; i--)
             {
                 Messages.RemoveAt(i);
             }
 
-            Messages.Insert(firstUserIndex + 1, new ChatMessage
-            {
-                Role = "assistant",
-                Text = "（已压缩 " + removed + " 条较早的对话以释放上下文；需要其中细节时，请让我重新读取相关文件）",
-            });
-
+            Messages.Insert(frozenEnd, NewSummaryMessage(summary));
             MarkLast();
             return removed;
+        }
+
+        /// <summary>
+        /// 历史摘要块的固定前缀（识别 + 展示用）
+        /// </summary>
+        internal const string SummaryMarker = "【上下文摘要】";
+
+        /// <summary>
+        /// 一条消息是否是历史摘要块 
+        /// </summary>
+        internal static bool IsSummaryMessage(ChatMessage message)
+        {
+            if (message == null || message.IsUser || message.Blocks.Count == 0)
+            {
+                return false;
+            }
+
+            var first = message.Blocks[0];
+            return first.Kind == ChatBlockKind.Text && (first.Text ?? string.Empty).StartsWith(SummaryMarker, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// 造一条摘要消息 
+        /// </summary>
+        private static ChatMessage NewSummaryMessage(string summary)
+        {
+            var message = new ChatMessage { Role = "assistant" };
+            message.Blocks.Add(new ChatBlock { Kind = ChatBlockKind.Text, Text = summary });
+            return message;
+        }
+
+        /// <summary>
+        /// 把一条消息转成发给总结器的轮次 
+        /// </summary>
+        private static ChatTurn ToTurn(ChatMessage message)
+        {
+            return message.IsUser ? new ChatTurn("user", message.Text ?? string.Empty) : new ChatTurn("assistant", PlainTextOf(message));
         }
 
         public void DeleteConversation(string id)

@@ -42,15 +42,16 @@ namespace LangCode.Agent
             if (settings != null && settings.PlanMode)
             {
                 builder.AppendLine("【当前处于规划模式】");
-                builder.AppendLine("- 禁止修改任何文件、禁止执行命令、禁止调用 MCP / 打开网页；你只能用 list_files / read_file / search_text 做调研");
+                builder.AppendLine("- 禁止修改任何文件、禁止执行命令、禁止调用 MCP / 打开网页；本轮**只提供只读工具**（list_files / read_file / search_text / list_symbols / find_references / semantic_search 等）");
                 builder.AppendLine("- 先把现状看明白，再用 update_todo_list 给出分步计划，并说明关键假设、风险与取舍");
                 builder.AppendLine("- 计划要具体到「改哪个文件的哪一部分」，但此刻不要动手；用户确认后会把模式切到执行");
                 builder.AppendLine();
             }
 
             builder.AppendLine("可用工具（用 ```action 代码块发出；一个代码块里只放一个动作；**互不依赖的多个动作请写在同一轮里一起发出**）：");
-            // 工具清单与原生 schema 同源（ToolCatalog），不再手写 —— 新增工具只改一处
-            foreach (var tool in ToolCatalog.PromptOrdered())
+            // 工具清单与原生 schema 同源（ToolCatalog），不再手写 —— 新增工具只改一处；
+            // 规划模式下只列只读工具，前缀更短
+            foreach (var tool in ToolCatalog.PromptOrdered(settings != null && settings.PlanMode))
             {
                 builder.AppendLine(tool.PromptIndex + ". " + tool.Prompt);
             }

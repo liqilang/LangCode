@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Navigation;
 using System.Windows.Threading;
@@ -358,7 +359,7 @@ namespace LangCode.Ui.Controls
                 });
             }
 
-            body.Children.Add(new ScrollViewer
+            var codeScroll = new ScrollViewer
             {
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
@@ -373,7 +374,11 @@ namespace LangCode.Ui.Controls
                     TextWrapping = TextWrapping.NoWrap,
                     Foreground = Res("Ap.CodeFg", Color.FromRgb(0x9C, 0xDC, 0xFE)),
                 },
-            });
+            };
+
+            // 竖直滚轮让给外层对话列表（否则鼠标停在代码块上时整条对话滚不动）
+            ForwardVerticalWheel(codeScroll);
+            body.Children.Add(codeScroll);
 
             return new Border
             {
@@ -424,7 +429,7 @@ namespace LangCode.Ui.Controls
                 }
             }
 
-            return new ScrollViewer
+            var viewer = new ScrollViewer
             {
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
@@ -437,6 +442,75 @@ namespace LangCode.Ui.Controls
                     Child = grid,
                 },
             };
+
+            // 表格只做横向滚动：竖直滚轮必须让给外层对话列表，否则停在表格上就滚不动对话了
+            ForwardVerticalWheel(viewer);
+            return viewer;
+        }
+
+        /// <summary>
+        /// 让「只横向滚动」的内部容器（代码块 / 表格）把**竖直**滚轮事件让给外层的对话列表。
+        /// </summary>
+        /// <remarks>
+        /// <see cref="ScrollViewer"/> 会把 MouseWheel 标记为已处理（哪怕它自己竖着根本滚不动），
+        /// 于是鼠标停在表格 / 代码块上时，整条对话流就滚不动了。
+        /// 这里在 PreviewMouseWheel 里判断：内部竖向还有可滚空间就交给它自己滚；
+        /// 否则把滚轮事件**转发给最近的外层 ScrollViewer**（外层的滚动步长与模式保持原样）。
+        /// </remarks>
+        private static void ForwardVerticalWheel(ScrollViewer inner)
+        {
+            inner.PreviewMouseWheel += (sender, e) =>
+            {
+                if (!(sender is ScrollViewer viewer))
+                {
+                    return;
+                }
+
+                var canScrollVertically = viewer.ScrollableHeight > 0 &&
+                    ((e.Delta > 0 && viewer.VerticalOffset > 0) ||
+                     (e.Delta < 0 && viewer.VerticalOffset < viewer.ScrollableHeight));
+
+                if (canScrollVertically)
+                {
+                    // 内部自己还能竖向滚：不拦，交给它
+                    return;
+                }
+
+                var outer = FindAncestorScrollViewer(viewer);
+                if (outer == null)
+                {
+                    return;
+                }
+
+                // 把滚轮转发给外层：外层照它自己的方式滚（行滚 / 像素滚都正确）
+                outer.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+                {
+                    RoutedEvent = UIElement.MouseWheelEvent,
+                    Source = viewer,
+                });
+
+                e.Handled = true;
+            };
+        }
+
+        /// <summary>
+        /// 从当前元素向上找最近的 <see cref="ScrollViewer"/> 祖先（找不到返回 null）
+        /// </summary>
+        private static ScrollViewer FindAncestorScrollViewer(DependencyObject node)
+        {
+            var current = node == null ? null : VisualTreeHelper.GetParent(node);
+
+            while (current != null)
+            {
+                if (current is ScrollViewer viewer)
+                {
+                    return viewer;
+                }
+
+                current = VisualTreeHelper.GetParent(current);
+            }
+
+            return null;
         }
 
         private Border Cell(string markdown, bool isHeader)

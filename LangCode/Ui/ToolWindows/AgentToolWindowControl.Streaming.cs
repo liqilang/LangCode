@@ -1,6 +1,7 @@
 ﻿using LangCode.Chat;
 using LangCode.Domain.Catalog;
 using LangCode.Domain.Chat;
+using LangCode.Persistence;
 using LangCode.Ui.Presentation;
 using System;
 using System.Linq;
@@ -606,7 +607,18 @@ namespace LangCode.Ui.ToolWindows
             TkFree.Text = Format(Math.Max(0, total - usage.Used));
 
             // 费用估算（整个会话）：本地模型为 0，未收录的模型按兜底价折算
-            TkCost.Text = "≈ " + ModelPricing.FormatCost(_settings.Model, usage.Input, usage.Output);
+            var cost = "≈ " + ModelPricing.FormatCost(_settings.Model, usage.Input, usage.Output);
+
+            // 提示缓存命中（P2）：把「服务端按折扣价计费的那部分输入」也显示出来，
+            // 让用户能直观看到缓存有没有生效 —— 命中率越高，长任务的输入花费越低
+            var conversation = UsageStore.ForConversation(_session.ConversationId);
+            if (conversation.CachedTokens > 0 && conversation.InputTokens > 0)
+            {
+                var hitRate = conversation.CachedTokens / conversation.InputTokens * 100.0;
+                cost += " · 缓存 " + Format(conversation.CachedTokens) + "（" + hitRate.ToString("0") + "%）";
+            }
+
+            TkCost.Text = cost;
         }
 
         private static string Format(double value)

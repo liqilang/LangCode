@@ -1262,7 +1262,16 @@
                                                                    Width="15"
                                                                    Height="15"/>
                                                 </Button>
-                                                <!-- MCP 服务器的入口已收进「设置 → MCP」：顶部只留最常用的三个 -->
+                                                <!-- MCP 服务器：打开独立的 MCP 视图（已安装 / 市场） -->
+                                                <Button x:Name="BtnMcp"
+                                                        Style="{StaticResource IconButton}"
+                                                        AutomationProperties.Name="MCP 服务器"
+                                                        ToolTip="MCP 服务器"
+                                                        Click="BtnMcp_Click">
+                                                        <prim:Icon IconName="server"
+                                                                   Width="15"
+                                                                   Height="15"/>
+                                                </Button>
                                                 <Button x:Name="BtnSettings"
                                                         Style="{StaticResource IconButton}"
                                                         AutomationProperties.Name="设置"
@@ -1900,7 +1909,7 @@
                                                                                            TextTrimming="CharacterEllipsis"
                                                                                            VerticalAlignment="Center"
                                                                                            Cursor="Hand"
-                                                                                           ToolTip="点击在 Visual Studio 中打开"
+                                                                                           ToolTip="点击查看与改动前的差异对比"
                                                                                            MouseLeftButtonUp="SummaryPath_Click"/>
                                                                                 <TextBlock Grid.Column="2"
                                                                                            Text="{Binding StatLabel}"
@@ -2485,6 +2494,8 @@
                 <!-- ══════════════════ 抽屉（覆盖层） ══════════════════ -->
                 <tw:HistoryDrawerControl x:Name="HistoryDrawer"
                                          Visibility="Collapsed"/>
+                <tw:McpDrawerControl x:Name="McpDrawer"
+                                     Visibility="Collapsed"/>
                 <tw:SettingsDrawerControl x:Name="SettingsDrawer"
                                           Visibility="Collapsed"/>
         </Grid>

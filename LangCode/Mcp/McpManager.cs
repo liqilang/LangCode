@@ -130,8 +130,8 @@ namespace LangCode.Mcp
             {
                 if (Clients.TryGetValue(name, out var existing))
                 {
-                    // 命令/参数被改过 → 重建连接，否则一直用的是旧配置
-                    if (existing.Matches(server.Command, server.Arguments))
+                    // 命令 / 参数 / 环境变量被改过 → 重建连接，否则一直用的是旧配置
+                    if (existing.Matches(server.Command, server.Arguments, server.Environment))
                     {
                         return existing;
                     }
@@ -140,7 +140,7 @@ namespace LangCode.Mcp
                     Clients.Remove(name);
                 }
 
-                var created = new McpClient(name, server.Command, server.Arguments, WorkingDirectory);
+                var created = new McpClient(name, server.Command, server.Arguments, WorkingDirectory, server.Environment);
                 Clients[name] = created;
                 return created;
             }

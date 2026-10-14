@@ -153,7 +153,6 @@ namespace LangCode.Ui.ToolWindows
             yield return GeneralPanel;
             yield return ApiPanel;
             yield return ApprovalPanel;
-            yield return McpPanel;
             yield return EditorPanel;
             yield return AutomationPanel;
             yield return CapabilitiesPanel;
@@ -405,9 +404,6 @@ namespace LangCode.Ui.ToolWindows
                 // 通用 / 高级两个分页上的开关、下拉、文本框（按 Tag 反射对齐）
                 BindTaggedFields();
 
-                // MCP 服务器列表（数据化）
-                BuildMcpRows();
-
                 // 「配置档案」的名称默认填成当前模型名（空着才填，不覆盖用户已输入的内容）
                 if (string.IsNullOrWhiteSpace(SetProfileName.Text))
                 {
@@ -516,7 +512,6 @@ namespace LangCode.Ui.ToolWindows
             GeneralPanel.Visibility = key == "general" ? Visibility.Visible : Visibility.Collapsed;
             ApiPanel.Visibility = key == "api" ? Visibility.Visible : Visibility.Collapsed;
             ApprovalPanel.Visibility = key == "approval" ? Visibility.Visible : Visibility.Collapsed;
-            McpPanel.Visibility = key == "mcp" ? Visibility.Visible : Visibility.Collapsed;
             EditorPanel.Visibility = key == "editor" ? Visibility.Visible : Visibility.Collapsed;
             AutomationPanel.Visibility = key == "automation" ? Visibility.Visible : Visibility.Collapsed;
             CapabilitiesPanel.Visibility = key == "capabilities" ? Visibility.Visible : Visibility.Collapsed;

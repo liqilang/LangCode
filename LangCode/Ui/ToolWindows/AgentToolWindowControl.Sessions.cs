@@ -3,6 +3,7 @@ using LangCode.Domain.Catalog;
 using LangCode.Domain.Chat;
 using System;
 using System.Linq;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -32,6 +33,9 @@ namespace LangCode.Ui.ToolWindows
 
             _session.NewConversation();
             _session.ReloadHistory();
+
+            // 新会话 = 新的一批改动：差异对比的基线要清掉
+            _sessionBaselines.Clear();
 
             _workspaceNoticeShown = false;
 
@@ -77,11 +81,15 @@ namespace LangCode.Ui.ToolWindows
         }
 
         /// <summary>
-        /// 手动压缩上下文：折叠较早的中间对话（保留首条提示词与最近几条）
+        /// 手动压缩上下文：把较早的中间对话交给模型总结成一段摘要（保留首条提示词与最近几条）
         /// </summary>
-        private void CompactContext_Click(object sender, RoutedEventArgs e)
+        private async void CompactContext_Click(object sender, RoutedEventArgs e)
         {
-            var removed = _session.CompactNow();
+            var backend = ChatBackendFactory.Create(_settings);
+            var removed = await _session
+                .CompactAsync(backend, _settings, CancellationToken.None)
+                .ConfigureAwait(true);
+
             if (removed <= 0)
             {
                 ShowSessionActionHint("没有可压缩的上下文");
@@ -90,7 +98,7 @@ namespace LangCode.Ui.ToolWindows
 
             UpdateTokens();
             UpdateSessionHeader();
-            ShowSessionActionHint("已压缩 " + removed + " 条较早对话");
+            ShowSessionActionHint("已压缩 " + removed + " 条较早对话（已生成摘要）");
         }
 
         /// <summary>
@@ -393,8 +401,23 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
+            // 换会话：差异对比的基线要清掉（载入的会话由 git HEAD 兜底）
+            _sessionBaselines.Clear();
+
+            // ResetTurnActions 会把「继续 / 恢复 / 重试」清零；先把刚载入的状态记下来，回填后再放回去，
+            // 否则会话即使带着「可继续」标记，载入后请求条也是空的
+            var paused = _session.TurnPaused;
+            var interrupted = _session.TurnInterrupted;
+            var canRetry = _session.TurnCanRetry;
+
             _session.ContextWindow = _settings.ContextWindow;
             ResetTurnActions();
+
+            _session.TurnPaused = paused;
+            _session.TurnInterrupted = interrupted;
+            _session.TurnCanRetry = canRetry;
+            RefreshRequestBar();
+
             HistoryDrawer.SetActiveConversation(id);
 
             // 从历史里选了会话就把抽屉收起来：否则用户还得再点一次「返回」才能看到对话

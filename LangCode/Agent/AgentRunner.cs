@@ -199,6 +199,37 @@ namespace LangCode.Agent
         private int _fixRounds;
 
         /// <summary>
+        /// 历史前缀的「冻结」边界：<c>history[0.._frozenCount)</c> 是本次任务最初的轮次，
+        /// 压缩时**绝不改写**，保证前后两次请求的前缀逐字节一致、提示缓存能命中
+        /// </summary>
+        private int _frozenCount;
+
+        /// <summary>
+        /// 摘要区长度：紧跟在冻结前缀之后、由压缩**追加**的摘要块（只增不改写）
+        /// </summary>
+        private int _summaryCount;
+
+        /// <summary>
+        /// 本次 run 内「只读工具 → 结果指纹」表：命中说明同样的调用产生了同样的结果，
+        /// 回灌时只发一句「未变化」，省掉重复的大段文件内容
+        /// </summary>
+        private readonly Dictionary<string, ulong> _resultDigests = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// 参与「结果去重」的只读工具（重复调用且结果一致时省略内容）
+        /// </summary>
+        private static readonly HashSet<string> DedupTools = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "read_file", "list_files", "search_text", "list_symbols",
+            "find_references", "semantic_search", "get_type_hierarchy", "find_implementations",
+        };
+
+        /// <summary>
+        /// 摘要块在回灌历史里的固定前缀（便于识别，也便于排查「这张摘要从哪来」）
+        /// </summary>
+        private const string SummaryMarker = "【上下文摘要】";
+
+        /// <summary>
         /// 单轮自动化（验证 / 修复）回灌给模型的输出上限：验证输出动辄几千行
         /// </summary>
         private const int MaxAutomationOutputChars = 6000;
@@ -294,6 +325,12 @@ namespace LangCode.Agent
             _verifiedThisRun = false;
             _fixRounds = 0;
 
+            // 压缩相关的运行态同样每轮重置：本次任务最初的轮次构成「冻结前缀」，
+            // 之后的压缩只会往它后面**追加**摘要，绝不改写前面已发送过的字节
+            _frozenCount = history.Count;
+            _summaryCount = 0;
+            _resultDigests.Clear();
+
             // 本轮是否真正执行过工具、以及「只说不做」已经催过几次（用于判断要不要续跑）
             var toolUsesThisRun = 0;
             var actionNudges = 0;
@@ -328,8 +365,9 @@ namespace LangCode.Agent
                     return;
                 }
 
-                // 每步都带着完整历史往返：不折叠的话，几十步的长任务迟早把上下文顶爆
-                CompactHistory(history);
+                // 每步都带着完整历史往返：不折叠的话，几十步的长任务迟早把上下文顶爆。
+                // 折叠采用「总结式 + 只追加」，见 CompactHistoryAsync
+                await CompactHistoryAsync(history, cancellationToken).ConfigureAwait(false);
 
                 callbacks.OnTurnStart?.Invoke();
 
@@ -364,8 +402,9 @@ namespace LangCode.Agent
                     // 原生 function calling（可选）：后端会把 tool_calls 翻译成动作块，
                     // 因此这里的循环完全不用改 —— 两条路径共用同一套解析与执行。
                     // OpenAI 兼容与 Anthropic 原生两套 tools 格式同时给出，各后端各取所需
-                    ToolsJson = _settings.NativeToolCalling ? ToolCatalog.BuildToolsJson() : string.Empty,
-                    AnthropicToolsJson = _settings.NativeToolCalling ? ToolCatalog.BuildAnthropicToolsJson() : string.Empty,
+                    // 规划模式下只暴露只读工具（与系统提示词里的清单保持一致）
+                    ToolsJson = _settings.NativeToolCalling ? ToolCatalog.BuildToolsJson(_settings.PlanMode) : string.Empty,
+                    AnthropicToolsJson = _settings.NativeToolCalling ? ToolCatalog.BuildAnthropicToolsJson(_settings.PlanMode) : string.Empty,
 
                     // 自定义网关的私有参数（例：vLLM/Qwen3 开思考）
                     ExtraBodyJson = _settings.GetProviderOption("caps.extraBody") ?? string.Empty,
@@ -483,9 +522,19 @@ namespace LangCode.Agent
                     }
 
                     callbacks.OnToolResult?.Invoke(action, result);
+
                     // 单条结果也过一道预算：一次 read_file / 命令输出就能有几万字符，
                     // 原样留在历史里意味着后面每一步都要重发
-                    results.Append(ToolProtocol.FormatForModel(action.Name, result.Ok, ShrinkToolResult(result.Output))).Append('\n');
+                    var fed = ShrinkToolResult(result.Output);
+
+                    // 只读工具去重：同样的调用 + 同样的结果说明内容没变，
+                    // 回灌一句「未变化」即可，不必把整段文件内容再发一次
+                    if (result.Ok && IsDuplicateResult(action, fed))
+                    {
+                        fed = "（" + action.Name + " 的结果与本次任务中上一次完全相同，内容未变化，已省略）";
+                    }
+
+                    results.Append(ToolProtocol.FormatForModel(action.Name, result.Ok, fed)).Append('\n');
 
                     // 审计日志（可选）：记录这次工具调用的参数摘要与结果，便于复盘与合规
                     AuditToolCall(action, result);
@@ -498,12 +547,22 @@ namespace LangCode.Agent
         }
 
         /// <summary>
-        /// 折叠一轮任务内的历史（工具往返记录）
+        /// 折叠一轮任务内的历史（工具往返记录）。
         /// </summary>
-        private void CompactHistory(List<ChatTurn> history)
+        /// <remarks>
+        /// 与旧实现的两点关键差异（都是为了让长任务更省 token）：
+        /// <list type="number">
+        /// <item><b>总结式</b>：被折叠的较早记录先交给模型压成一段结构化摘要，而不是直接丢弃 ——
+        /// 直接丢弃会让模型丢掉目标 / 当前状态，转而去重新读文件，反而更费 token。</item>
+        /// <item><b>只追加，不改写</b>：最早的一批轮次（<see cref="_frozenCount"/>）与已生成的摘要块
+        /// （<see cref="_summaryCount"/>）永不改写，压缩只是在摘要区**追加**一条 ——
+        /// 这样前后两次请求的前缀逐字节一致，提示缓存才能命中（旧实现每步都重排前缀，缓存全废）。</item>
+        /// </list>
+        /// </remarks>
+        private async Task CompactHistoryAsync(List<ChatTurn> history, CancellationToken cancellationToken)
         {
             var window = _settings?.ContextWindow ?? 0;
-            if (window <= 0 || history.Count <= 4)
+            if (window <= 0)
             {
                 return;
             }
@@ -521,12 +580,19 @@ namespace LangCode.Agent
                 return;
             }
 
+            // live tail 从「冻结前缀 + 已追加摘要」之后开始；只有它会被折叠
+            var tailStart = _frozenCount + _summaryCount;
+            if (tailStart >= history.Count)
+            {
+                return;
+            }
+
             // 最近一段最多占预算的一半：另一半留给系统提示词与下一轮输出
             var recentBudget = budget / 2.0;
             var keepFrom = history.Count;
             var recent = 0.0;
 
-            for (var i = history.Count - 1; i >= 1; i--)
+            for (var i = history.Count - 1; i >= tailStart; i--)
             {
                 recent += TokenEstimator.EstimateMessage(history[i].Content);
                 keepFrom = i;
@@ -536,26 +602,101 @@ namespace LangCode.Agent
                 }
             }
 
-            if (keepFrom <= 1)
+            // 连最近一段都超预算（单步输出就极长）：没有可折叠的中间段
+            if (keepFrom <= tailStart)
             {
                 return;
             }
 
-            var compacted = new List<ChatTurn>
-            {
-                history[0],
-                new ChatTurn(
-                "assistant",
-                "（为节省上下文，较早的 " + (keepFrom - 1) + " 条工具往返记录已折叠需要其中细节时请重新读取相关文件）")
-            };
+            var dropped = history.GetRange(tailStart, keepFrom - tailStart);
 
-            for (var i = keepFrom; i < history.Count; i++)
+            // 总结式压缩：让模型把被折叠段压成一段结构化摘要（失败 / 太短则退回固定说明）
+            string summary = null;
+            try
             {
-                compacted.Add(history[i]);
+                summary = await ContextSummarizer
+                    .SummarizeAsync(_backend, _settings, dropped, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                summary = null;
             }
 
-            history.Clear();
-            history.AddRange(compacted);
+            if (string.IsNullOrWhiteSpace(summary))
+            {
+                summary = "（为节省上下文，较早的 " + dropped.Count +
+                          " 条工具往返记录已折叠；需要其中细节时请重新读取相关文件）";
+            }
+            else
+            {
+                summary = SummaryMarker + "（已折叠较早的 " + dropped.Count + " 条记录，以下为要点）\n" +
+                          Trim(summary, 4000);
+            }
+
+            // 只在摘要区**追加**一条：tailStart 之前的字节一个都不动（缓存前缀保持稳定）
+            history.RemoveRange(tailStart, keepFrom - tailStart);
+            history.Insert(tailStart, new ChatTurn("assistant", summary));
+            _summaryCount++;
+        }
+
+        /// <summary>
+        /// 只读工具的重复结果判定：同样的调用 + 同样的结果 ⇒ 内容未变化，回灌可省略。
+        /// </summary>
+        private bool IsDuplicateResult(ToolAction action, string output)
+        {
+            if (!DedupTools.Contains(action.Name))
+            {
+                return false;
+            }
+
+            var key = action.Name + "|" + StableArgs(action);
+            var digest = StableHash(output ?? string.Empty);
+
+            if (_resultDigests.TryGetValue(key, out var previous) && previous == digest)
+            {
+                return true;
+            }
+
+            _resultDigests[key] = digest;
+            return false;
+        }
+
+        /// <summary>
+        /// 参数拼成稳定字符串（排序后拼接）：保证「同样一次调用」得到同样的 key。
+        /// </summary>
+        private static string StableArgs(ToolAction action)
+        {
+            var parts = new List<string>(action.Arguments.Count);
+            foreach (var pair in action.Arguments)
+            {
+                parts.Add(pair.Key + "=" + (pair.Value ?? string.Empty));
+            }
+
+            parts.Sort(StringComparer.Ordinal);
+            return string.Join("&", parts);
+        }
+
+        /// <summary>
+        /// FNV-1a 64 位哈希：只用来判断「两次结果是否相同」，不做安全用途。
+        /// </summary>
+        private static ulong StableHash(string text)
+        {
+            const ulong offset = 14695981039346656037UL;
+            const ulong prime = 1099511628211UL;
+
+            var hash = offset;
+            foreach (var c in text)
+            {
+                hash ^= c;
+                hash *= prime;
+            }
+
+            return hash;
         }
         /// <summary>
         /// 单条工具结果回灌给模型时的字符上限（超出即掐掉中段）
@@ -676,21 +817,8 @@ namespace LangCode.Agent
 
         private static string ShrinkToolResult(string output)
         {
-            var text = output ?? string.Empty;
-            if (text.Length <= MaxToolResultChars)
-            {
-                return text;
-            }
-
-            // 头 70% + 尾 30%：编译 / 测试失败的结论通常落在输出末尾，
-            // 只砍尾会把最该看的报错丢掉；中间那段（重复的编译过程、整段代码）才是冗余
-            var head = MaxToolResultChars * 7 / 10;
-            var tail = MaxToolResultChars - head;
-            var omitted = text.Length - head - tail;
-
-            return text.Substring(0, head)
-                + "\n…（中间省略 " + omitted + " 字符；需要原文请缩小范围重新读取，例如带 start_line / end_line 或更精确的搜索）…\n"
-                + text.Substring(text.Length - tail);
+            // 与跨轮回灌共用同一口径（见 ToolOutputTrimmer），避免两处截断逻辑漂移
+            return ToolOutputTrimmer.Shrink(output, MaxToolResultChars);
         }
 
 

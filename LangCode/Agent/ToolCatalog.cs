@@ -223,29 +223,64 @@ namespace LangCode.Agent
         }
 
         /// <summary>
-        /// 按提示词编号排序的工具清单（供系统提示词生成编号列表）
+        /// 某个工具在当前模式下是否要暴露给模型。
         /// </summary>
-        public static IEnumerable<ToolDescriptor> PromptOrdered()
+        /// <remarks>
+        /// 规划模式只暴露只读（非破坏性）工具：既省掉一大段用不上的 schema / 提示词
+        /// （工具清单是每一步都重复发送的**固定前缀**，越短越省），也避免模型在只查看阶段尝试写文件。
+        /// </remarks>
+        public static bool IsOffered(ToolDescriptor tool, bool planMode)
         {
-            var ordered = new List<ToolDescriptor>(Definitions);
+            return tool != null && (!planMode || !tool.Destructive);
+        }
+
+        /// <summary>
+        /// 当前模式下要暴露的工具集合（schema 顺序）。非规划模式即全量。
+        /// </summary>
+        public static IList<ToolDescriptor> Offered(bool planMode)
+        {
+            if (!planMode)
+            {
+                return Definitions;
+            }
+
+            var list = new List<ToolDescriptor>(Definitions.Length);
+            foreach (var tool in Definitions)
+            {
+                if (!tool.Destructive)
+                {
+                    list.Add(tool);
+                }
+            }
+
+            return list;
+        }
+
+        /// <summary>
+        /// 按提示词编号排序的工具清单（供系统提示词生成编号列表），按模式过滤
+        /// </summary>
+        public static IEnumerable<ToolDescriptor> PromptOrdered(bool planMode = false)
+        {
+            var ordered = new List<ToolDescriptor>(Offered(planMode));
             ordered.Sort((a, b) => a.PromptIndex.CompareTo(b.PromptIndex));
             return ordered;
         }
 
         /// <summary>
-        /// 构造 OpenAI 兼容的 <c>tools</c> 数组 JSON
+        /// 构造 OpenAI 兼容的 <c>tools</c> 数组 JSON（按模式过滤）
         /// </summary>
-        public static string BuildToolsJson()
+        public static string BuildToolsJson(bool planMode = false)
         {
+            var tools = Offered(planMode);
             var builder = new StringBuilder("[");
-            for (var i = 0; i < Definitions.Length; i++)
+            for (var i = 0; i < tools.Count; i++)
             {
                 if (i > 0)
                 {
                     builder.Append(',');
                 }
 
-                var tool = Definitions[i];
+                var tool = tools[i];
                 builder.Append("{\"type\":\"function\",\"function\":{\"name\":\"").Append(tool.Name)
                        .Append("\",\"description\":\"").Append(ToolCallTranslator.Escape(tool.Description))
                        .Append("\",\"parameters\":{\"type\":\"object\",\"properties\":")
@@ -259,21 +294,22 @@ namespace LangCode.Agent
 
         /// <summary>
         /// 构造 Anthropic 原生 Messages API 的 <c>tools</c> 数组 JSON：
-        /// <c>{"name":..,"description":..,"input_schema":{...}}</c>。
+        /// <c>{"name":..,"description":..,"input_schema":{...}}</c>（按模式过滤）。
         /// 最后一个工具打一个 <c>cache_control</c> 断点：工具清单在一轮任务里每步都重复发送，
         /// 缓存命中后按折扣价计费（Anthropic 提示缓存的推荐做法）。
         /// </summary>
-        public static string BuildAnthropicToolsJson()
+        public static string BuildAnthropicToolsJson(bool planMode = false)
         {
+            var tools = Offered(planMode);
             var builder = new StringBuilder("[");
-            for (var i = 0; i < Definitions.Length; i++)
+            for (var i = 0; i < tools.Count; i++)
             {
                 if (i > 0)
                 {
                     builder.Append(',');
                 }
 
-                var tool = Definitions[i];
+                var tool = tools[i];
                 builder.Append("{\"name\":\"").Append(tool.Name)
                        .Append("\",\"description\":\"").Append(ToolCallTranslator.Escape(tool.Description))
                        .Append("\",\"input_schema\":{\"type\":\"object\",\"properties\":")
@@ -281,7 +317,7 @@ namespace LangCode.Agent
                        .Append(",\"required\":").Append(tool.Required)
                        .Append('}');
 
-                if (i == Definitions.Length - 1)
+                if (i == tools.Count - 1)
                 {
                     builder.Append(",\"cache_control\":{\"type\":\"ephemeral\"}");
                 }
