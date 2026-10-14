@@ -600,7 +600,7 @@ namespace LangCode.Chat
         /// <summary>
         /// 助手消息的纯文本（正文 + 代码卡 + 长任务编排卡片，供再次发回模型时使用）
         /// </summary>
-        private static string PlainTextOf(ChatMessage message)
+        internal static string PlainTextOf(ChatMessage message)
         {
             return string.Join(
                 "\n",
@@ -612,7 +612,7 @@ namespace LangCode.Chat
         /// <summary>
         /// 单个内容块的纯文本（不同块取文本的地方不一样）
         /// </summary>
-        private static string PlainTextOfBlock(ChatBlock block)
+        internal static string PlainTextOfBlock(ChatBlock block)
         {
             switch (block.Kind)
             {

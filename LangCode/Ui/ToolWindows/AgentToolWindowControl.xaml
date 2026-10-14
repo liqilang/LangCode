@@ -37,6 +37,54 @@
                                         Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ButtonBase}}"/>
                         </Style>
 
+                        <!--
+                                消息上的图标按钮（复制 / 编辑 / 分叉）：
+                                平时不占视线，鼠标经过这条消息时才随操作行一起出现
+                        -->
+                        <Style x:Key="MsgIconButton"
+                               TargetType="Button">
+                                <Setter Property="Width"
+                                        Value="22"/>
+                                <Setter Property="Height"
+                                        Value="22"/>
+                                <Setter Property="Padding"
+                                        Value="0"/>
+                                <Setter Property="Cursor"
+                                        Value="Hand"/>
+                                <Setter Property="FocusVisualStyle"
+                                        Value="{x:Null}"/>
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource Ap.IconMuted}"/>
+                                <Setter Property="Template">
+                                        <Setter.Value>
+                                                <ControlTemplate TargetType="Button">
+                                                        <Border x:Name="Bd"
+                                                                Background="Transparent"
+                                                                CornerRadius="5">
+                                                                <ContentPresenter HorizontalAlignment="Center"
+                                                                                  VerticalAlignment="Center"/>
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver"
+                                                                         Value="True">
+                                                                        <Setter TargetName="Bd"
+                                                                                Property="Background"
+                                                                                Value="{DynamicResource Ap.BgHover}"/>
+                                                                        <Setter Property="Foreground"
+                                                                                Value="{DynamicResource Ap.FgBright}"/>
+                                                                </Trigger>
+                                                                <Trigger Property="IsPressed"
+                                                                         Value="True">
+                                                                        <Setter TargetName="Bd"
+                                                                                Property="Background"
+                                                                                Value="{DynamicResource Ap.BgActive}"/>
+                                                                </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                        </Setter.Value>
+                                </Setter>
+                        </Style>
+
                         <!-- 折叠箭头（IsChecked=True → 朝下展开；False → 朝右折叠） -->
                         <Style x:Key="ChevronToggle"
                                TargetType="ToggleButton">
@@ -185,7 +233,9 @@
                         <!-- ==================== 消息模板 ==================== -->
 
                         <DataTemplate x:Key="UserMessageTemplate">
-                                <Grid HorizontalAlignment="Right"
+                                <Grid x:Name="UserMsgRoot"
+                                      HorizontalAlignment="Right"
+                                      Background="Transparent"
                                       Margin="0,0,0,18">
                                         <!--
                                                 编辑态：**就地**编辑 ——内容不搬到下面的输入框，
@@ -257,15 +307,6 @@
                                                                            FontSize="13"
                                                                            LineHeight="21"
                                                                            LineStackingStrategy="BlockLineHeight"/>
-                                                                <!--
-                                                                        气泡右下角的「编辑」提示（对齐设计稿）：
-                                                                        气泡本身就是点击就地编辑的入口，这里把这件事说出来，不必靠 ToolTip 猜
-                                                                -->
-                                                                <TextBlock Text="编辑"
-                                                                           HorizontalAlignment="Right"
-                                                                           Margin="0,5,0,0"
-                                                                           FontSize="10"
-                                                                           Foreground="{DynamicResource Ap.FgFaint}"/>
                                                         </StackPanel>
                                                 </Border>
                                                 <!-- 生成中排队的消息：明确标出来，别让人以为它已经发出去了 -->
@@ -275,22 +316,55 @@
                                                            FontSize="10.5"
                                                            Foreground="{DynamicResource Ap.FgFaint}"
                                                            Visibility="{Binding IsQueued, Converter={StaticResource BoolToVis}}"/>
-                                                <!-- 从这里分叉：保留这条消息及之前的内容，另起一个新分支 -->
-                                                <Button Style="{StaticResource ActButton}"
-                                                        HorizontalAlignment="Right"
-                                                        Margin="0,5,1,0"
-                                                        Click="ForkMessage_Click"
-                                                        ToolTip="从此处另开一个分支：保留这条消息及之前的内容，之后的对话在新分支里继续（原会话仍保留在历史里）">
-                                                        <StackPanel Orientation="Horizontal">
-                                                                <prim:Icon IconName="expand"
-                                                                           Width="10"
-                                                                           Height="10"
-                                                                           VerticalAlignment="Center"/>
-                                                                <TextBlock Text="分叉"
-                                                                           Margin="4,0,0,0"
-                                                                           Style="{StaticResource ActLabel}"/>
-                                                        </StackPanel>
-                                                </Button>
+                                                <!--
+                                                        消息操作：复制 / 编辑 / 分叉 —— 同一行三个图标按钮，
+                                                        鼠标经过这条消息才出现（默认值写在 Style 里：本地值会盖过触发器，
+                                                        直接写 Opacity="0" 的话触发器就再也改不动它了）
+                                                -->
+                                                <StackPanel Orientation="Horizontal"
+                                                            HorizontalAlignment="Right"
+                                                            Margin="0,4,1,0">
+                                                        <StackPanel.Style>
+                                                                <Style TargetType="StackPanel">
+                                                                        <Setter Property="Opacity"
+                                                                                Value="0"/>
+                                                                        <Setter Property="IsHitTestVisible"
+                                                                                Value="False"/>
+                                                                        <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsMouseOver, ElementName=UserMsgRoot}"
+                                                                                             Value="True">
+                                                                                        <Setter Property="Opacity"
+                                                                                                Value="1"/>
+                                                                                        <Setter Property="IsHitTestVisible"
+                                                                                                Value="True"/>
+                                                                                </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                </Style>
+                                                        </StackPanel.Style>
+                                                        <Button Style="{StaticResource MsgIconButton}"
+                                                                Click="CopyMessage_Click"
+                                                                ToolTip="复制这条消息的内容">
+                                                                <prim:Icon IconName="copy"
+                                                                           Width="12"
+                                                                           Height="12"/>
+                                                        </Button>
+                                                        <Button Style="{StaticResource MsgIconButton}"
+                                                                Margin="2,0,0,0"
+                                                                Click="EditMessage_Click"
+                                                                ToolTip="编辑这条消息并重新发送（会丢弃它之后的对话）">
+                                                                <prim:Icon IconName="edit"
+                                                                           Width="12"
+                                                                           Height="12"/>
+                                                        </Button>
+                                                        <Button Style="{StaticResource MsgIconButton}"
+                                                                Margin="2,0,0,0"
+                                                                Click="ForkMessage_Click"
+                                                                ToolTip="从此处另开一个分支：保留这条消息及之前的内容，之后的对话在新分支里继续（原会话仍保留在历史里）">
+                                                                <prim:Icon IconName="branch"
+                                                                           Width="12"
+                                                                           Height="12"/>
+                                                        </Button>
+                                                </StackPanel>
                                         </StackPanel>
                                 </Grid>
                         </DataTemplate>
@@ -968,7 +1042,9 @@
                                                       SubTaskTemplate="{StaticResource SubTaskBlockTemplate}"/>
 
                         <DataTemplate x:Key="AssistantMessageTemplate">
-                                <Grid Margin="0,0,0,18">
+                                <Grid x:Name="AssistantMsgRoot"
+                                      Background="Transparent"
+                                      Margin="0,0,0,18">
                                         <!--
                                                 头像不再挂「一条消息」上：改成**每一步**一个，
                                                 由思考行与正文各自的模板画出来（多步任务才看得出步骤推进）
@@ -1015,6 +1091,36 @@
                                                         它们按需出现在输入框上方的请求条上（判定逻辑见 Models/RequestBar.cs），
                                                         任务正常跑完时什么按钮都不显示
                                                 -->
+
+                                                <!-- 消息操作：复制 —— 鼠标经过这条回复才出现 -->
+                                                <StackPanel Orientation="Horizontal"
+                                                            HorizontalAlignment="Left"
+                                                            Margin="0,5,0,0">
+                                                        <StackPanel.Style>
+                                                                <Style TargetType="StackPanel">
+                                                                        <Setter Property="Opacity"
+                                                                                Value="0"/>
+                                                                        <Setter Property="IsHitTestVisible"
+                                                                                Value="False"/>
+                                                                        <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsMouseOver, ElementName=AssistantMsgRoot}"
+                                                                                             Value="True">
+                                                                                        <Setter Property="Opacity"
+                                                                                                Value="1"/>
+                                                                                        <Setter Property="IsHitTestVisible"
+                                                                                                Value="True"/>
+                                                                                </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                </Style>
+                                                        </StackPanel.Style>
+                                                        <Button Style="{StaticResource MsgIconButton}"
+                                                                Click="CopyMessage_Click"
+                                                                ToolTip="复制这条回复的内容">
+                                                                <prim:Icon IconName="copy"
+                                                                           Width="12"
+                                                                           Height="12"/>
+                                                        </Button>
+                                                </StackPanel>
                                         </StackPanel>
                                 </Grid>
                         </DataTemplate>

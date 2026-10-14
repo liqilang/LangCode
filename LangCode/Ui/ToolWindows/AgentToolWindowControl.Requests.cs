@@ -405,6 +405,38 @@ namespace LangCode.Ui.ToolWindows
         }
 
         /// <summary>
+        /// 复制这条消息的内容：用户消息取正文，助手消息取正文 + 代码卡 / 清单等纯文本
+        /// </summary>
+        private void CopyMessage_Click(object sender, RoutedEventArgs e)
+        {
+            var message = (sender as FrameworkElement)?.DataContext as ChatMessage;
+            if (message == null)
+            {
+                return;
+            }
+
+            var text = message.IsUser
+                ? message.Text
+                : LangCode.Chat.ChatSession.PlainTextOf(message);
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                ShowSessionActionHint("这条消息没有可复制的文字");
+                return;
+            }
+
+            try
+            {
+                Clipboard.SetText(text);
+                ShowSessionActionHint("已复制 " + text.Length + " 个字符");
+            }
+            catch (Exception)
+            {
+                ShowSessionActionHint("复制失败");
+            }
+        }
+
+        /// <summary>
         /// 点用户消息上的编辑按钮：在<b>原地</b>把它变成输入框 ——
         /// 不把内容搬到下面的输入框改完点「保存并重新发送」即可丢弃它之后的对话并用新内容重跑
         /// </summary>
