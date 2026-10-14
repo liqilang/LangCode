@@ -223,10 +223,10 @@ namespace LangCode.Domain.Settings
         public int MaxOutputTokens { get; set; } = 8192;
 
         /// <summary>
-        /// 上下文窗口（token）默认与默认模型 DeepSeek V4.1 Flash 的 1M 对齐
+        /// 上下文窗口（token）默认按 128k 保守估计：宁可早一点折叠历史，也别攒到把上下文顶爆
         /// </summary>
         [DataMember(Name = "contextWindow", Order = 25)]
-        public int ContextWindow { get; set; } = 1048576;
+        public int ContextWindow { get; set; } = 131072;
 
         [DataMember(Name = "temperature", Order = 26)]
         public double Temperature { get; set; } = 0.2;
@@ -502,7 +502,7 @@ namespace LangCode.Domain.Settings
 
         // ==================== 上下文 / 隐私 ====================
         [DataMember(Name = "autoCompactThreshold", Order = 60)]
-        public string AutoCompactThreshold { get; set; } = "80%";
+        public string AutoCompactThreshold { get; set; } = "60%";
 
         /// <summary>
         /// 「自动压缩阈值」的数字形式（10~100）解析不出或越界时按 80 处理

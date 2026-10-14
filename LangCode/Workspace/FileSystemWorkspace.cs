@@ -194,12 +194,12 @@ namespace LangCode.Workspace
         /// <summary>
         /// 单文件读取上限（<b>字符数</b>），超过即截断
         /// </summary>
-        public int MaxFileChars { get; set; } = 200_000;
+        public int MaxFileChars { get; set; } = 40_000;
 
         /// <summary>
         /// 列目录 / 搜索的返回上限
         /// </summary>
-        public int MaxResults { get; set; } = 200;
+        public int MaxResults { get; set; } = 100;
 
         // ==================== 按路径写锁 ====================
         // 并行子任务可能同时改不同的文件；万一撞到同一个文件，必须串行落盘，
@@ -417,7 +417,7 @@ namespace LangCode.Workspace
 
                 if (truncated)
                 {
-                    builder.Append("[已截断：文件超过 ").Append(MaxFileChars).Append(" 字符]\n");
+                    builder.Append("[已截断：文件超过 ").Append(MaxFileChars).Append(" 字符；请改用 start_line / end_line 分段读取需要的部分]\n");
                 }
 
                 return Ok(builder.ToString());
@@ -474,7 +474,7 @@ namespace LangCode.Workspace
                             continue;
                         }
 
-                        builder.Append(relative).Append(':').Append(i + 1).Append(": ").Append(lines[i].Trim()).Append('\n');
+                        builder.Append(relative).Append(':').Append(i + 1).Append(": ").Append(ClipLine(lines[i])).Append('\n');
                         if (++hits >= MaxResults)
                         {
                             return Ok(builder.ToString());
@@ -489,6 +489,22 @@ namespace LangCode.Workspace
                 return Fail(ex.Message);
             }
         }
+        /// <summary>
+        /// 搜索命中行的最大展示字符数：一行几万字符的压缩产物 / 生成代码会把整个结果撑爆
+        /// </summary>
+        private const int MaxHitLineChars = 300;
+
+        /// <summary>
+        /// 裁剪搜索命中的单行（先 Trim，再按字符数截断）
+        /// </summary>
+        private static string ClipLine(string line)
+        {
+            var text = (line ?? string.Empty).Trim();
+            return text.Length <= MaxHitLineChars
+                ? text
+                : text.Substring(0, MaxHitLineChars) + "…";
+        }
+
 
         /// <summary>
         /// 列出文件里的符号（类 / 方法 / 函数）及行号

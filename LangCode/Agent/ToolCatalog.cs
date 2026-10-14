@@ -137,8 +137,8 @@ namespace LangCode.Agent
             new ToolDescriptor("goto_definition", "在编辑器里打开文件并请求「转到定义」（借用 Visual Studio 自带能力）", "{\"path\":{\"type\":\"string\"},\"line\":{\"type\":\"integer\"}}", "[\"path\"]", ToolDispatch.Orchestration, false, ApprovalCatalog.Read, 15,
                 "转到定义：{\"tool\":\"goto_definition\",\"path\":\"src/App.tsx\",\"line\":42}\n   · 会在编辑器里借用 Visual Studio 自带的「转到定义」跳转，供用户肉眼确认"),
 
-            new ToolDescriptor("semantic_search", "语义检索：按功能/概念关键词找相关代码片段（先找再精读，省 token）", "{\"query\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\"}}", "[\"query\"]", ToolDispatch.Local, false, ApprovalCatalog.Read, 16,
-                "语义检索（找相关代码片段）：{\"tool\":\"semantic_search\",\"query\":\"登录表单校验\",\"limit\":8}\n   · 按功能 / 概念找相关片段，比 search_text 更「懂意图」不确定代码在哪时先用它，再 read_file 精读"),
+            new ToolDescriptor("semantic_search", "语义检索：按功能/概念关键词找相关代码片段（不知道目标在哪时优先用它，再精读，省 token）", "{\"query\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\"}}", "[\"query\"]", ToolDispatch.Local, false, ApprovalCatalog.Read, 16,
+                "语义检索（按功能 / 概念找相关代码片段，**不知道目标在哪时优先用它**）：{\"tool\":\"semantic_search\",\"query\":\"登录表单校验\",\"limit\":8}\n   · 比直接整文件读省得多：先用它定位到片段，再决定要不要 read_file 精读；同一轮里可以一次发多个检索"),
 
             new ToolDescriptor("get_type_hierarchy", "查一个类型的继承链（基类 / 接口 / 已知派生类型）", "{\"type\":{\"type\":\"string\"}}", "[\"type\"]", ToolDispatch.Local, false, ApprovalCatalog.Read, 17,
                 "类型继承链：{\"tool\":\"get_type_hierarchy\",\"type\":\"HttpClient\"}\n   · 返回基类 / 实现的接口与已知派生类型"),

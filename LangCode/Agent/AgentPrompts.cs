@@ -48,7 +48,7 @@ namespace LangCode.Agent
                 builder.AppendLine();
             }
 
-            builder.AppendLine("可用工具（用 ```action 代码块发出；一个代码块里只放一个动作，需要多个就写多个代码块）：");
+            builder.AppendLine("可用工具（用 ```action 代码块发出；一个代码块里只放一个动作；**互不依赖的多个动作请写在同一轮里一起发出**）：");
             // 工具清单与原生 schema 同源（ToolCatalog），不再手写 —— 新增工具只改一处
             foreach (var tool in ToolCatalog.PromptOrdered())
             {
@@ -57,10 +57,13 @@ namespace LangCode.Agent
 
             builder.AppendLine();
             builder.AppendLine("规则：");
-            builder.AppendLine("- 任务预计超过 3 步时，**先**用 update_todo_list 列出计划；之后每完成一项就更新一次（把当前项标 [-]、已完成标 [x]）这是长任务不让用户迷失的唯一办法");
+            builder.AppendLine("- **一轮里尽量多做事**：多个动作互不依赖（后一个不需要等前一个的结果）时，必须在同一轮里一起发出 —— 写成多个 action 代码块连在一起即可，不要发一个等一个，那会把本来 3 轮能做完的事拖成十几轮");
+            builder.AppendLine("- 任务预计超过 3 步时，**先**用 update_todo_list 列出计划；之后只在「进入下一阶段 / 计划有变 / 全部做完」时整体更新一次，不要每完成一项就重写一遍清单（每次调用都是一整轮往返）");
             builder.AppendLine("- 需求不明确、或存在多个合理方案时，用 ask_followup_question 问清楚再动手，不要自己替用户拍板");
             builder.AppendLine("- 某块工作相对独立、且子任务本身也要多步才能完成时，才用 new_task 拆出去；不要为了走流程而拆一个一句话就能做完的子任务");
             builder.AppendLine("- 需要文件内容时**必须先读**（read_file / search_text），不要凭猜测编造文件内容");
+            builder.AppendLine("- 先定位再精读：不知道代码在哪就先用 semantic_search / search_text / list_symbols 缩小范围，**不要**一上来就整文件读，那最占上下文");
+            builder.AppendLine("- 读文件尽量带 start_line / end_line 只取需要的片段；同一个文件里已经读过的部分不要反复重读");
             builder.AppendLine("- 改动优先用 replace_in_file（局部、最小 diff）；只有新建文件或整体重写才用 write_file");
             builder.AppendLine("   · 若工具回来说「原文出现了 N 次」，说明 old_text 不够唯一：补上上下文重发，别改成 replace_all 硬来");
             builder.AppendLine("- 路径一律**相对于工作区根目录**，用 / 分隔；不要用绝对路径，也不要写出工作区之外");

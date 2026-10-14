@@ -129,7 +129,8 @@ namespace LangCode.Agent
         private const string ActionNudgePrompt =
             "你上一条只描述了打算怎么做，但**没有发出任何 ```action 代码块**，所以实际什么都没执行。\n" +
             "请立刻动手：直接输出 ```action 代码块来调用工具（read_file / write_file / replace_in_file / edit_symbol / run_command 等），\n" +
-            "不要复述计划、也不必征求同意。如果确实已经全部完成、无需再调用任何工具，就直接给出最终结论。";
+            "不要复述计划、也不必征求同意。需要多个互不依赖的动作时，请在同一轮里一起发出\n" +
+            "如果确实已经全部完成、无需再调用任何工具，就直接给出最终结论。";
 
         /// <summary>
         /// 判断模型是不是「只说要干、却没干」：短文本里出现第一人称的行动预告。
@@ -417,6 +418,11 @@ namespace LangCode.Agent
 
                 toolUsesThisRun += actions.Count;
 
+                // 回灌历史前折叠动作里的长参数：write_file 的 content 动辄几千字符，
+                // 那段代码会在后面每一步请求里重发一遍，是长任务里最大的一笔冤枉开销
+                // （界面渲染用的是上面 OnTurnComplete 收到的原始文本，不受影响）
+                raw = FoldActionArguments(raw);
+
                 history.Add(new ChatTurn("assistant", raw));
 
                 var results = new StringBuilder();
@@ -477,7 +483,9 @@ namespace LangCode.Agent
                     }
 
                     callbacks.OnToolResult?.Invoke(action, result);
-                    results.Append(ToolProtocol.FormatForModel(action.Name, result.Ok, result.Output)).Append('\n');
+                    // 单条结果也过一道预算：一次 read_file / 命令输出就能有几万字符，
+                    // 原样留在历史里意味着后面每一步都要重发
+                    results.Append(ToolProtocol.FormatForModel(action.Name, result.Ok, ShrinkToolResult(result.Output))).Append('\n');
 
                     // 审计日志（可选）：记录这次工具调用的参数摘要与结果，便于复盘与合规
                     AuditToolCall(action, result);
@@ -549,6 +557,142 @@ namespace LangCode.Agent
             history.Clear();
             history.AddRange(compacted);
         }
+        /// <summary>
+        /// 单条工具结果回灌给模型时的字符上限（超出即掐掉中段）
+        /// </summary>
+        private const int MaxToolResultChars = 12000;
+
+        /// <summary>
+        /// 压缩一条工具结果
+        /// </summary>
+        /// <remarks>
+        /// 读文件 / 搜索 / 命令输出动辄几万字符，而它们会**永久留在历史里、每一步重发一遍**：
+        /// 不设上限的话，一次长任务几十步下来，光工具结果就能把上下文顶爆。
+        /// </remarks>
+        /// <summary>
+        /// 动作围栏标记（三个反引号）运行时用 new string 拼出，而不是写字符串字面量：
+        /// 本文件自身的读写也走 Markdown 围栏协议，源码里出现连续三个反引号会把围栏提前截断
+        /// </summary>
+        private static readonly string ActionFence = new string('`', 3);
+
+        /// <summary>
+        /// 回灌历史前折叠动作块里的**长参数**
+        /// </summary>
+        /// <remarks>
+        /// 带动作的模型输出会原样进入历史，之后每一步请求都要重发一遍。
+        /// 而 write_file 的 content 动辄几千字符，同一段代码重发 N 次，
+        /// 是「改代码类任务」烧 token 的头号原因。
+        /// 模型并不需要重读自己刚写下的内容（真要复查，读对应文件即可），
+        /// 因此这里把超长参数换成「多少字符、已省略」的摘要。
+        /// 只在**回灌历史**时折叠；界面渲染用的仍是原始文本。
+        /// </remarks>
+        private static string FoldActionArguments(string assistantText, int threshold = 600)
+        {
+            if (string.IsNullOrEmpty(assistantText) ||
+                assistantText.IndexOf(ActionFence, StringComparison.Ordinal) < 0)
+            {
+                return assistantText;
+            }
+
+            var builder = new StringBuilder(assistantText.Length);
+            var cursor = 0;
+
+            while (cursor < assistantText.Length)
+            {
+                var fence = assistantText.IndexOf(ActionFence, cursor, StringComparison.Ordinal);
+                if (fence < 0)
+                {
+                    builder.Append(assistantText, cursor, assistantText.Length - cursor);
+                    break;
+                }
+
+                // 围栏到行尾之间是语言标注；正文从下一行开始（与 ToolProtocol 的围栏协议一致）
+                var lineEnd = assistantText.IndexOf('\n', fence);
+                if (lineEnd < 0)
+                {
+                    builder.Append(assistantText, cursor, assistantText.Length - cursor);
+                    break;
+                }
+
+                var language = assistantText
+                    .Substring(fence + ActionFence.Length, lineEnd - fence - ActionFence.Length)
+                    .Trim();
+
+                if (!string.Equals(language, "action", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 不是动作块（普通代码块）：整行原样搬走，继续往后扫
+                    builder.Append(assistantText, cursor, lineEnd + 1 - cursor);
+                    cursor = lineEnd + 1;
+                    continue;
+                }
+
+                var bodyEnd = assistantText.IndexOf(ActionFence, lineEnd + 1, StringComparison.Ordinal);
+                if (bodyEnd < 0)
+                {
+                    builder.Append(assistantText, cursor, assistantText.Length - cursor);
+                    break;
+                }
+
+                // 围栏行 + 折叠后的正文；结束围栏留给下一轮循环原样搬走
+                builder.Append(assistantText, cursor, lineEnd + 1 - cursor);
+                builder.Append(FoldActionBody(assistantText.Substring(lineEnd + 1, bodyEnd - lineEnd - 1), threshold));
+                cursor = bodyEnd;
+            }
+
+            return builder.ToString();
+        }
+
+        /// <summary>
+        /// 折叠单个动作的正文（解析不出工具名时原样返回，绝不破坏动作协议）
+        /// </summary>
+        private static string FoldActionBody(string body, int threshold)
+        {
+            var parsed = LiteJson.ParseFlatObject(body);
+            if (parsed == null || !parsed.ContainsKey("tool"))
+            {
+                return body;
+            }
+
+            var builder = new StringBuilder("{");
+            var first = true;
+            foreach (var pair in parsed)
+            {
+                if (!first)
+                {
+                    builder.Append(',');
+                }
+
+                first = false;
+                builder.Append(LiteJson.Quote(pair.Key)).Append(':');
+
+                var value = pair.Value ?? string.Empty;
+                builder.Append(value.Length <= threshold
+                    ? LiteJson.Quote(value)
+                    : LiteJson.Quote("（此处省略 " + value.Length + " 字符：内容已写入或已用于定位，需要复查时请读取对应文件）"));
+            }
+
+            return builder.Append('}').ToString();
+        }
+
+        private static string ShrinkToolResult(string output)
+        {
+            var text = output ?? string.Empty;
+            if (text.Length <= MaxToolResultChars)
+            {
+                return text;
+            }
+
+            // 头 70% + 尾 30%：编译 / 测试失败的结论通常落在输出末尾，
+            // 只砍尾会把最该看的报错丢掉；中间那段（重复的编译过程、整段代码）才是冗余
+            var head = MaxToolResultChars * 7 / 10;
+            var tail = MaxToolResultChars - head;
+            var omitted = text.Length - head - tail;
+
+            return text.Substring(0, head)
+                + "\n…（中间省略 " + omitted + " 字符；需要原文请缩小范围重新读取，例如带 start_line / end_line 或更精确的搜索）…\n"
+                + text.Substring(text.Length - tail);
+        }
+
 
         /// <summary>
         /// 落盘一次改动，并在成功之后通知界面（界面据此打开 VS 差异对比）
