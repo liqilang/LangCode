@@ -59,8 +59,10 @@
     </Content>
   </ItemGroup>
 
-  <ItemGroup> 
+  <ItemGroup>
     <Reference Include="System.Design" />
+    <!-- 选择工作区目录用 WinForms 的 FolderBrowserDialog（net472 的 WPF 没有选目录对话框） -->
+    <Reference Include="System.Windows.Forms" />
   </ItemGroup>
 
   <ItemGroup> 

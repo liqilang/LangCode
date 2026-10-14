@@ -9,6 +9,7 @@ using LangCode.VsIntegration;
 using LangCode.Workspace;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -153,6 +154,17 @@ namespace LangCode.Ui.ToolWindows
         /// 本窗口会话里是否已经提示过「没有工作区」，避免每轮都刷一遍同样的提示
         /// </summary>
         private bool _workspaceNoticeShown;
+
+        /// <summary>
+        /// 本会话里是否已经弹过「选择工作区目录」对话框：用户取消后本轮不再反复弹
+        /// </summary>
+        private bool _workspacePromptedInSession;
+
+        /// <summary>
+        /// 用户手动选定的工作区根目录（VS 里没有打开解决方案/文件夹时的兜底）。
+        /// 一旦 VS 里打开了解决方案/文件夹，以 VS 的为准
+        /// </summary>
+        private string _userPickedWorkspaceRoot;
 
         /// <summary>
         /// 消息区内部那个 ScrollViewer（判断「是否贴底」要用它，ListBox 模板应用后才拿得到）
@@ -444,24 +456,85 @@ namespace LangCode.Ui.ToolWindows
         }
 
         /// <summary>
-        /// 懒定位工作区根目录（= VS 已打开的解决方案 / 文件夹所在目录）
+        /// 定位 / 刷新工作区根目录（= VS 已打开的解决方案 / 文件夹所在目录）
+        /// <para>
+        /// 每次调用都重新向 VS 询问当前根目录：从 A 解决方案切到 B 解决方案后，
+        /// 根目录会变，这里会重建工作区（早期实现「拿到一次就长期缓存」，导致切到 B 后仍用 A）。
+        /// </para>
+        /// <para>
+        /// VS 里没有打开解决方案 / 文件夹时：若有用户手动选定的目录就用它；
+        /// 否则在 <paramref name="canPromptIfMissing"/> 为真时弹出「选择目录」对话框，
+        /// 让用户指定 / 新建一个目录作为工作区（选定后即可启用文件工具）。
+        /// </para>
         /// </summary>
-        private void EnsureWorkspace()
+        /// <param name="canPromptIfMissing">
+        /// 是否允许在「完全没有工作区」时弹目录选择框（仅用户主动发送时允许，避免打开窗口就弹）
+        /// </param>
+        private void EnsureWorkspace(bool canPromptIfMissing = false)
         {
             // DTE 只能在 UI 线程访问（VSTHRD010）；显式断言，也便于分析器跟踪
             Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
 
+            var vsRoot = VsWorkspaceLocator.TryGetSolutionDirectory();
+
+            // ① VS 里有解决方案 / 打开文件夹：以它为准 —— 切换项目时 vsRoot 会与 _workspaceRoot 不同，据此重建
+            if (!string.IsNullOrEmpty(vsRoot))
+            {
+                if (!string.Equals(vsRoot, _workspaceRoot, StringComparison.OrdinalIgnoreCase) ||
+                    _workspace == null)
+                {
+                    CreateWorkspace(vsRoot);
+                    // 工作区可用了：允许以后再提示（例如之后又把解决方案关掉）
+                    _workspaceNoticeShown = false;
+                }
+
+                return;
+            }
+
+            // ② VS 里没有工作区：优先沿用用户手动选定的目录（若该目录仍在）
+            if (!string.IsNullOrEmpty(_userPickedWorkspaceRoot) &&
+                Directory.Exists(_userPickedWorkspaceRoot))
+            {
+                if (!string.Equals(_userPickedWorkspaceRoot, _workspaceRoot, StringComparison.OrdinalIgnoreCase) ||
+                    _workspace == null)
+                {
+                    CreateWorkspace(_userPickedWorkspaceRoot);
+                    _workspaceNoticeShown = false;
+                }
+
+                return;
+            }
+
+            // ③ 完全没有工作区：用户主动发送时弹一次目录选择框（取消后本会话不再重复弹）
+            if (canPromptIfMissing && !_workspacePromptedInSession)
+            {
+                _workspacePromptedInSession = true;
+                var picked = PromptForWorkspaceFolder();
+                if (!string.IsNullOrEmpty(picked))
+                {
+                    _userPickedWorkspaceRoot = picked;
+                    CreateWorkspace(picked);
+                    _workspaceNoticeShown = false;
+                    return;
+                }
+            }
+
+            // ④ 兜底：清掉可能残留的旧工作区（例如把原解决方案关掉、且用户没有手动选定目录），
+            //    避免继续用已经过期的项目目录
             if (_workspace != null)
             {
-                return;
+                _workspace = null;
+                _mentions = null;
+                _workspaceRoot = string.Empty;
+                _workspaceNoticeShown = false;
             }
+        }
 
-            var root = VsWorkspaceLocator.TryGetSolutionDirectory();
-            if (string.IsNullOrEmpty(root))
-            {
-                return;
-            }
-
+        /// <summary>
+        /// 按根目录构建 <see cref="FileSystemWorkspace"/> 与 @ 提及索引（构建失败则退化为无工作区）
+        /// </summary>
+        private void CreateWorkspace(string root)
+        {
             try
             {
                 _workspace = new FileSystemWorkspace(root)
@@ -478,6 +551,27 @@ namespace LangCode.Ui.ToolWindows
             {
                 _workspace = null;
                 _mentions = null;
+                _workspaceRoot = string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// 弹出「选择工作区目录」对话框；选定返回绝对路径，取消返回 null。
+        /// 用 WinForms 的 <see cref="System.Windows.Forms.FolderBrowserDialog"/>（net472 的 WPF 没有选目录对话框），
+        /// 它自带「新建文件夹」按钮，可以直接建一个新目录当工作区
+        /// </summary>
+        private static string PromptForWorkspaceFolder()
+        {
+            using (var dialog = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description = "选择一个目录作为 LangCode 的工作区（AI 会在其中读写文件，可直接在这里新建文件夹）",
+                ShowNewFolderButton = true,
+                SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            })
+            {
+                return dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK
+                    ? dialog.SelectedPath
+                    : null;
             }
         }
 
@@ -494,38 +588,21 @@ namespace LangCode.Ui.ToolWindows
             // DTE 只能在 UI 线程访问（VSTHRD010）
             Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
 
-            var root = VsWorkspaceLocator.TryGetSolutionDirectory();
+            // 先按当前 VS 项目 / 用户选定目录刷新工作区：切换项目时 _workspaceRoot 会在这里更新，
+            // 并顺带重建下面的 @ 索引（不弹目录选择框，避免点开 @ 就弹窗）
+            EnsureWorkspace();
+
+            var root = _workspaceRoot;
             if (string.IsNullOrEmpty(root))
             {
                 // 没有工作区：保持现状，界面会给出提示
                 return;
             }
 
-            var rootChanged =
-                !string.Equals(root, _workspaceRoot, StringComparison.OrdinalIgnoreCase);
-
-            if (rootChanged || _workspace == null)
-            {
-                try
-                {
-                    _workspace = new FileSystemWorkspace(root)
-                    {
-                        MaxFileChars = 200_000,
-                        MaxResults = 200,
-                    };
-                }
-                catch (Exception)
-                {
-                    _workspace = null;
-                }
-
-                _workspaceRoot = root;
-            }
-
-            if (rootChanged || _mentions == null || !_mentions.IsReady)
+            // EnsureWorkspace 在重建工作区时会一并重建 @ 索引；这里只兜底「索引缺失」与「主动重扫」
+            if (_mentions == null)
             {
                 _mentions = new WorkspaceIndex(root);
-                _workspaceRoot = root;
             }
             else if (forceRescan)
             {

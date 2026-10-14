@@ -39,6 +39,9 @@ namespace LangCode.Ui.ToolWindows
 
             _workspaceNoticeShown = false;
 
+            // 新会话：允许再弹一次「选择工作区目录」对话框
+            _workspacePromptedInSession = false;
+
             // 新会话：把输入框上方还挂着的提及芯片一并清掉
             TakePendingMentions();
 

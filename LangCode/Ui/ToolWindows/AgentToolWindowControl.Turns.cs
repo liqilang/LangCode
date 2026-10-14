@@ -33,8 +33,10 @@ namespace LangCode.Ui.ToolWindows
             }
 
             // 工作区是「懒定位」的：工具窗口可能在解决方案打开之前就已创建，
-            // 用户也可能先开窗口再打开文件夹 —— 每次发送都再确认一次，取到就自动升级为 Agent 模式
-            EnsureWorkspace();
+            // 用户也可能先开窗口再打开文件夹 / 切换项目 —— 每次发送都重新定位一次，
+            // 根目录变了就重建（切到 B 项目后不再用 A）。
+            // 若 VS 里完全没有工作区，这里会弹一次「选择目录」框让用户指定 / 新建目录
+            EnsureWorkspace(canPromptIfMissing: true);
 
             Input.Text = string.Empty;
             TakePendingMentions();
@@ -95,8 +97,9 @@ namespace LangCode.Ui.ToolWindows
                 assistant.Blocks.Add(new ChatBlock
                 {
                     Kind = ChatBlockKind.Note,
-                    Text = "未检测到 VS 工作区（没有打开解决方案或文件夹），本轮按纯对话处理，不会读写文件" +
-                           "在 VS 里打开解决方案/文件夹后再发一次即可启用文件工具",
+                    Text = "未检测到 VS 工作区（没有打开解决方案或文件夹），本轮按纯对话处理，不会读写文件。" +
+                           "在 VS 里打开解决方案/文件夹后再发一次即可启用文件工具；" +
+                           "或开一个新会话发送消息，按提示选择一个目录作为工作区（AI 可在其中创建新项目）",
                 });
             }
 

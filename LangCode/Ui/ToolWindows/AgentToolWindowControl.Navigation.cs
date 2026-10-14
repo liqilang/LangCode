@@ -141,6 +141,9 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private string ResolveInRoot(string relativePath)
         {
+            // 每次解析前重新定位一次：切换项目后即使还没发消息，点击文件链接也应落到当前项目根目录
+            EnsureWorkspace();
+
             var root = _workspace?.Root;
 
             // 工作区还没定位（工具窗口先于解决方案打开）时再取一次

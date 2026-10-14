@@ -12,9 +12,9 @@ namespace LangCode.Ui.ToolWindows
     {
         public AgentToolWindow() : base(null)
         {
-            Caption = "LangCode —— AI 编程助手";
+            Caption = "LangCode 编程助手";
 
-            // 工具窗口内容 = WPF 用户控件（1:1 复刻 UIUX 设计稿）
+            // 工具窗口内容 = WPF 用户控件 
             Content = new AgentToolWindowControl();
         }
     }
