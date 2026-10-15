@@ -36,6 +36,11 @@ namespace LangCode.Ui.ToolWindows
 
         public DataTemplate CodeTemplate { get; set; }
 
+        /// <summary>
+        /// 文件卡（读文件 / 新增文件）：内容不在对话里展开，点卡片直接在 VS 里打开
+        /// </summary>
+        public DataTemplate FileTemplate { get; set; }
+
         public DataTemplate DiffTemplate { get; set; }
 
         public DataTemplate DoneTemplate { get; set; }
@@ -69,6 +74,8 @@ namespace LangCode.Ui.ToolWindows
                     return ThinkingTemplate ?? TextTemplate;
                 case ChatBlockKind.CodeCard:
                     return CodeTemplate ?? TextTemplate;
+                case ChatBlockKind.FileCard:
+                    return FileTemplate ?? CodeTemplate ?? TextTemplate;
 
                 // 操作确认卡复用差异卡模板（同样的标题 / 目标 / 接受·拒绝·批注），
                 // 靠 ShowsDiffStats 把 +N/−N 统计藏掉

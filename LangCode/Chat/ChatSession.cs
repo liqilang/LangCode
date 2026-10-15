@@ -647,7 +647,8 @@ namespace LangCode.Chat
                     return block.Text;
 
                 case ChatBlockKind.CodeCard:
-                    // 代码卡存的是工具结果的**全文**（读文件 / 命令输出等）。跨轮次重发前必须走
+                case ChatBlockKind.FileCard:
+                    // 代码卡 / 文件卡存的是工具结果的**全文**（读文件 / 命令输出等）。跨轮次重发前必须走
                     // 与单轮回灌相同的截断口径，否则 ShrinkToolResult 的努力会在下一回合被 BuildTurns 整段绕过
                     return ToolOutputTrimmer.Shrink(block.Text);
 

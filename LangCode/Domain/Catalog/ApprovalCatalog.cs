@@ -144,7 +144,7 @@ namespace LangCode.Domain.Catalog
 
             if (wired.Count == 0)
             {
-                return "Auto";
+                return "自动";
             }
 
             var approved = 0;

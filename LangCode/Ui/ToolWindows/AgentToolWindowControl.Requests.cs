@@ -405,6 +405,31 @@ namespace LangCode.Ui.ToolWindows
         }
 
         /// <summary>
+        /// 复制**一段**助手正文（鼠标经过正文时浮出的那个小图标）：只复制这一段，不夹带其它卡片
+        /// </summary>
+        private void CopyBlock_Click(object sender, RoutedEventArgs e)
+        {
+            var block = (sender as FrameworkElement)?.DataContext as ChatBlock;
+            var text = block?.Text;
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                ShowSessionActionHint("这段文字是空的");
+                return;
+            }
+
+            try
+            {
+                Clipboard.SetText(text);
+                ShowSessionActionHint("已复制 " + text.Length + " 个字符");
+            }
+            catch (Exception)
+            {
+                ShowSessionActionHint("复制失败");
+            }
+        }
+
+        /// <summary>
         /// 复制这条消息的内容：用户消息取正文，助手消息取正文 + 代码卡 / 清单等纯文本
         /// </summary>
         private void CopyMessage_Click(object sender, RoutedEventArgs e)
@@ -673,12 +698,20 @@ namespace LangCode.Ui.ToolWindows
             return Dispatcher.InvokeAsync(() =>
             {
                 var auto = _settings.AutoApproveEdits;
+
+                // 标题说清这是「新增文件」还是「编辑文件」；是否已落盘由状态文案（已应用）与
+                // 底栏（等待确认）表达，标题本身不必再分 Proposed / Applied
                 var card = new ChatBlock
                 {
                     Kind = ChatBlockKind.DiffCard,
-                    Title = auto ? "Applied Diff" : "Proposed Diff",
+                    Title = edit.IsNewFile ? "新增文件" : "编辑文件",
                     Path = edit.RelativePath,
                     Lines = edit.Diff,
+
+                    // 点卡片直接在 VS 里开差异对比：记住改动前后全文，
+                    // 待审批时看的是「提议的内容」（此时磁盘上还没有改动）
+                    BeforeText = edit.OriginalText ?? string.Empty,
+                    AfterText = edit.NewText ?? string.Empty,
                 };
 
                 // 自动批准：只留一条「已应用」的记录，不出现任何按钮

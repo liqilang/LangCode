@@ -152,14 +152,22 @@ namespace LangCode.Ui.ToolWindows
         /// <summary>
         /// 同步输入框上方「开始新任务」按钮的显隐：每次任务跑完就出现
         /// </summary>
-        private void UpdateNewTaskButton()
+        /// <param name="forceWhenIdle">
+        /// 载入历史会话时用 true：会话本身可能停在「最后一次没跑完」的状态（最后一条是用户消息、
+        /// 或带着继续 / 恢复标记），但它已经不是进行中的任务了 —— 照样给一个「开始新任务」的出口
+        /// </param>
+        private void UpdateNewTaskButton(bool forceWhenIdle = false)
         {
             if (NewTaskBtn == null)
             {
                 return;
             }
 
-            NewTaskBtn.Visibility = IsTaskComplete() ? Visibility.Visible : Visibility.Collapsed;
+            var show = forceWhenIdle
+                ? !_session.IsBusy && _session.Messages.Count > 0
+                : IsTaskComplete();
+
+            NewTaskBtn.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         }
 
         /// <summary>
@@ -420,6 +428,10 @@ namespace LangCode.Ui.ToolWindows
             _session.TurnInterrupted = interrupted;
             _session.TurnCanRetry = canRetry;
             RefreshRequestBar();
+
+            // 载入的会话已不是「进行中」的任务：无论它当初是跑完还是中断，
+            // 输入框上方都要给一个「开始新任务」的出口
+            UpdateNewTaskButton(forceWhenIdle: true);
 
             HistoryDrawer.SetActiveConversation(id);
 

@@ -5,6 +5,7 @@ using LangCode.VsIntegration;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
@@ -253,6 +254,7 @@ namespace LangCode.Ui.ToolWindows
             };
 
             _turnText = null;
+            _turnRawText = null;
 
             await backend
                 .SendAsync(request, delta => AppendStreaming(assistant, delta), token)
@@ -276,6 +278,7 @@ namespace LangCode.Ui.ToolWindows
                         // 下一次推理增量会自动在**末尾**新建一块（不再共用同一块）
                         CloseStepThinking();
                         _turnText = null;
+                        _turnRawText = null;
                     }),
                     DispatcherPriority.Background),
 
@@ -343,6 +346,10 @@ namespace LangCode.Ui.ToolWindows
                                 edit.RelativePath,
                                 edit.Diff.Count(line => line.Kind == DiffLineKind.Add),
                                 edit.Diff.Count(line => line.Kind == DiffLineKind.Delete));
+
+                            // 对话里的「编辑文件 / 新增文件」记录：自动批准不会经过审批卡，
+                            // 不在这里补一张卡的话，文件被改了对话里却什么都看不到
+                            RecordAppliedEditCard(assistant, edit);
                         }
 
                         FollowEdit(edit);
@@ -402,6 +409,35 @@ namespace LangCode.Ui.ToolWindows
             };
 
             await runner.RunAsync(turns, callbacks, token).ConfigureAwait(true);
+        }
+
+        /// <summary>
+        /// 把一段流式正文并入本轮正文块：界面显示的是**去掉工具动作块**后的文本。
+        /// 模型是边想边吐的，工具动作（```action …）吐完之前正文区会先闪出
+        /// 「list_files(...)」之类的原始动作代码；这里在流式期间就把它藏起来，
+        /// 让用户直接看到随后出现的卡片，而不是先看一眼工具代码
+        /// </summary>
+        private void AppendTurnText(ChatMessage target, string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            // 本步新起一块时，原文累加器也一起归零 —— 否则上一步的原文会带进来，
+            // 让这一步的正文里残留上一步的动作代码
+            if (_turnText == null)
+            {
+                _turnText = ChatSession.BeginText(target);
+                _turnRawText = null;
+            }
+
+            _turnRawText ??= new StringBuilder();
+            _turnRawText.Append(text);
+
+            // 原文攒在 _turnRawText 上，展示用的正文每次都由原文重新去除动作块 ——
+            // 不能直接把增量追加到已过滤的正文上，否则动作块消失后紧跟着的增量会粘错位置
+            _turnText.Text = ToolProtocol.StripActionsForDisplay(_turnRawText.ToString());
         }
 
         /// <summary>

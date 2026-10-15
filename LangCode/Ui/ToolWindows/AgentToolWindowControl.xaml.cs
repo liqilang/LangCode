@@ -201,6 +201,13 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private ChatBlock _turnText;
 
+        /// <summary>
+        /// 本轮正文的**原始**累积文本（含 ```action 工具块）。
+        /// 界面上的正文块显示的是它的「去动作」版本，但游标必须攒在原文上 ——
+        /// 否则动作块被隐藏后再来的增量会粘到正文里（见 <see cref="AppendTurnText"/>）
+        /// </summary>
+        private StringBuilder _turnRawText;
+
         // ============================================================
         // 流式合流 + 平滑吐字：模型吐字很快时，逐条刷新会把界面拖卡
         // ============================================================

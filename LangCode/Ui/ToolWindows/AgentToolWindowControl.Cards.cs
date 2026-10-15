@@ -63,7 +63,12 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
-            if (action.Name == "write_file" || action.Name == "replace_in_file")
+            // 改动类工具不再出通用的「工具结果」卡：成功时差异卡（审批卡 / 落盘后补的
+            // 「已应用」卡，见 RecordAppliedEditCard）已经记下了这次改动，重复出卡等于同一件事显示两遍。
+            // 但**失败**（例如 old_text 不唯一）确实需要一条痕迹 —— 除非刚才那张审批卡
+            // 已经写明结论（已拒绝），那就没必要再补一条失败提示
+            if (IsEditTool(action.Name) &&
+                (result.Ok || HasDecidedDiffCard(message, ToolPath(action))))
             {
                 return;
             }
@@ -86,7 +91,7 @@ namespace LangCode.Ui.ToolWindows
                 var live = _liveCommandCard;
                 _liveCommandCard = null;
 
-                live.Title = result.Ok ? "Run Command" : "Run Command（失败）";
+                live.Title = result.Ok ? "运行命令" : "运行命令（失败）";
                 live.Text = result.Output ?? string.Empty;
                 live.IsBodyVisible = true;
 
@@ -104,11 +109,14 @@ namespace LangCode.Ui.ToolWindows
             var writer = ToolTitle(action.Name);
             var path = ToolPath(action);
 
-            // 「读取文件 / 列目录 / 搜索」这类**浏览型**结果默认折叠：
-            // 它们往往很长（整个文件、整串目录、一堆匹配行），摊开会把对话主线挤走；
+            // 读文件：内容**不在对话里展开**，卡片只当一条记录 + 入口 ——
+            // 点卡片（或文件名）直接在 VS 里打开，比在工具窗口里读一遍强
+            var isFileCard = action.Name == "read_file";
+
+            // 「列目录 / 搜索」这类**浏览型**结果默认折叠：
+            // 它们往往很长（整串目录、一堆匹配行），摊开会把对话主线挤走；
             // 需要看的时候点一下箭头展开即可其它工具结果仍遵循「长文默认折叠」设置
-            var isBrowsing = action.Name == "read_file"
-                || action.Name == "list_files"
+            var isBrowsing = action.Name == "list_files"
                 || action.Name == "search_text"
                 || action.Name == "semantic_search"
                 || action.Name == "list_symbols"
@@ -118,12 +126,14 @@ namespace LangCode.Ui.ToolWindows
 
             message.Blocks.Add(new ChatBlock
             {
-                Kind = result.Ok ? ChatBlockKind.CodeCard : ChatBlockKind.Note,
+                Kind = result.Ok
+                    ? (isFileCard ? ChatBlockKind.FileCard : ChatBlockKind.CodeCard)
+                    : ChatBlockKind.Note,
                 Title = result.Ok ? writer : writer + "（失败）",
                 Path = path,
                 LineHint = ParseLine(action.Get("start_line")),
                 Text = result.Output ?? string.Empty,
-                IsBodyVisible = isBrowsing ? false : !_settings.CollapseLongText,
+                IsBodyVisible = isFileCard || isBrowsing ? false : !_settings.CollapseLongText,
             });
 
             // 「跟随显示」：读文件时把该文件在编辑器里打开（用户能立刻看到 AI 在看什么）
@@ -251,7 +261,7 @@ namespace LangCode.Ui.ToolWindows
                 _todoCard = new ChatBlock
                 {
                     Kind = ChatBlockKind.Todo,
-                    Title = "Task Progress",
+                    Title = "任务进度",
                     IsBodyVisible = true,
                 };
 
@@ -287,7 +297,7 @@ namespace LangCode.Ui.ToolWindows
                 var card = new ChatBlock
                 {
                     Kind = ChatBlockKind.Question,
-                    Title = "Waiting for your answer",
+                    Title = "等待你的回答",
                     Text = question?.Question ?? string.Empty,
                     Options = question?.Options ?? [],
                     IsPendingQuestion = true
@@ -388,7 +398,7 @@ namespace LangCode.Ui.ToolWindows
                 var card = new ChatBlock
                 {
                     Kind = ChatBlockKind.SubTask,
-                    Title = "Sub Task",
+                    Title = "子任务",
                     Text = subTask.Task,
                     StatusText = "进行中",
                     IsSubTaskRunning = true,
@@ -424,31 +434,115 @@ namespace LangCode.Ui.ToolWindows
             ScrollToEnd();
         }
 
+        /// <summary>
+        /// 改动类工具（写文件 / 替换 / 结构化编辑 / 补丁 / 重命名）：
+        /// 它们在对话里的「记录」由差异卡承担，不再额外出一张通用的工具结果卡
+        /// </summary>
+        private static bool IsEditTool(string toolName)
+        {
+            switch (toolName)
+            {
+                case "write_file":
+                case "replace_in_file":
+                case "edit_symbol":
+                case "apply_patch":
+                case "rename_symbol":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// 这条消息里是否已经有同一文件的差异卡，并且结论已出（已应用 / 已拒绝）
+        /// </summary>
+        private static bool HasDecidedDiffCard(ChatMessage message, string path)
+        {
+            if (message == null || string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            // 卡片的 Path 是工作区归一化后的相对路径（'/' 分隔），动作参数里可能写成 '\\'
+            var normalized = path.Replace('\\', '/');
+
+            return message.Blocks.Any(block =>
+                block.Kind == ChatBlockKind.DiffCard &&
+                (block.IsAccepted || block.IsRejected) &&
+                string.Equals(
+                    (block.Path ?? string.Empty).Replace('\\', '/'),
+                    normalized,
+                    StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// 把一次「已落盘」的改动记进对话。
+        /// 自动批准时根本不走审批卡（<see cref="AgentRunner"/> 会直接落盘），
+        /// 于是出现「文件确实被改了，但对话里看不到编辑文件这一条」——
+        /// 这里按「是否已经有对应的审批卡」补一张「已应用」的编辑卡，点它就开 VS 差异对比
+        /// </summary>
+        private static void RecordAppliedEditCard(ChatMessage assistant, PendingEdit edit)
+        {
+            if (assistant == null || edit == null || string.IsNullOrWhiteSpace(edit.RelativePath))
+            {
+                return;
+            }
+
+            // ① 审批通过的路径：卡片就是按 edit.Diff 建的（同一个列表实例）→ 不重复出卡，
+            //    只把「改动前后全文」补上（点卡片开差异对比要用）
+            var existing = assistant.Blocks.LastOrDefault(block =>
+                block.Kind == ChatBlockKind.DiffCard && ReferenceEquals(block.Lines, edit.Diff));
+
+            if (existing != null)
+            {
+                existing.BeforeText = edit.OriginalText ?? string.Empty;
+                existing.AfterText = edit.NewText ?? string.Empty;
+                return;
+            }
+
+            // ② 自动批准的路径：对话里没有任何痕迹 → 补一张「已应用」的编辑卡
+            assistant.Blocks.Add(new ChatBlock
+            {
+                Kind = ChatBlockKind.DiffCard,
+                Title = edit.IsNewFile ? "新增文件" : "编辑文件",
+                Path = edit.RelativePath,
+                Lines = edit.Diff,
+                IsAccepted = true,
+                StatusText = "已应用",
+                IsBodyVisible = false,
+                BeforeText = edit.OriginalText ?? string.Empty,
+                AfterText = edit.NewText ?? string.Empty,
+            });
+        }
+
+        /// <summary>
+        /// 工具名 → 卡片标题（界面统一用中文）
+        /// </summary>
         private static string ToolTitle(string toolName)
         {
             switch (toolName)
             {
-                case "list_files": return "List Files";
-                case "read_file": return "Read File";
-                case "search_text": return "Search";
-                case "write_file": return "Create File";
-                case "replace_in_file": return "Edit File";
-                case "run_command": return "Run Command";
-                case "open_url": return "Open URL";
-                case "mcp_call": return "MCP Call";
-                case "list_symbols": return "List Symbols";
-                case "find_references": return "Find References";
-                case "semantic_search": return "Semantic Search";
-                case "get_type_hierarchy": return "Type Hierarchy";
-                case "find_implementations": return "Find Implementations";
-                case "edit_symbol": return "Edit Symbol";
-                case "apply_patch": return "Apply Patch";
-                case "rename_symbol": return "Rename Symbol";
-                case "run_tests": return "Run Tests";
-                case "browser_action": return "Browser";
-                case "goto_definition": return "Go To Definition";
-                case "debug_inspect": return "Debug Inspect";
-                case "debug_control": return "Debug Control";
+                case "list_files": return "列目录";
+                case "read_file": return "读文件";
+                case "search_text": return "搜索";
+                case "write_file": return "新增文件";
+                case "replace_in_file": return "编辑文件";
+                case "run_command": return "运行命令";
+                case "open_url": return "打开链接";
+                case "mcp_call": return "MCP 调用";
+                case "list_symbols": return "列出符号";
+                case "find_references": return "查找引用";
+                case "semantic_search": return "语义搜索";
+                case "get_type_hierarchy": return "类型层次";
+                case "find_implementations": return "查找实现";
+                case "edit_symbol": return "编辑符号";
+                case "apply_patch": return "应用补丁";
+                case "rename_symbol": return "重命名符号";
+                case "run_tests": return "运行测试";
+                case "browser_action": return "浏览器操作";
+                case "goto_definition": return "转到定义";
+                case "debug_inspect": return "调试检查";
+                case "debug_control": return "调试控制";
                 default: return toolName ?? string.Empty;
             }
         }

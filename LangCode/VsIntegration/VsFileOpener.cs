@@ -74,6 +74,40 @@ namespace LangCode.VsIntegration
         }
 
         /// <summary>
+        /// 打开 VS 自带的差异对比：两侧内容都来自内存（「改动前」vs「改动后（提议）」）。
+        /// 待审批的改动还没落盘，磁盘上的文件还是旧版 —— 这时必须用这个方法才能看到真正的差异
+        /// </summary>
+        public static bool TryOpenDiffContents(string beforeContent, string afterContent, string currentAbsolutePath)
+        {
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (string.IsNullOrWhiteSpace(currentAbsolutePath))
+            {
+                return false;
+            }
+
+            var dte = GetDte();
+            if (dte == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var before = WriteSnapshot(beforeContent, currentAbsolutePath);
+                var after = WriteSnapshot(afterContent, currentAbsolutePath, "after");
+
+                dte.ExecuteCommand("Tools.DiffFiles", "\"" + before + "\" \"" + after + "\"");
+                return true;
+            }
+            catch (Exception)
+            {
+                // 快照或差异窗口起不来：退化成「打开磁盘上的文件」，至少让用户看到当前内容
+                return TryOpenFile(currentAbsolutePath);
+            }
+        }
+
+        /// <summary>
         /// 打开 VS 自带的差异对比：把"修改前"的内容写到临时文件，再和磁盘上的当前文件比较
         /// </summary>
         public static bool TryOpenDiff(string beforeContent, string currentAbsolutePath)
@@ -174,6 +208,16 @@ namespace LangCode.VsIntegration
         /// </summary>
         public static string ResolveInRoot(string root, string relativePath)
         {
+            var full = ResolveInRootAllowMissing(root, relativePath);
+            return full != null && File.Exists(full) ? full : null;
+        }
+
+        /// <summary>
+        /// 同 <see cref="ResolveInRoot"/>，但**不要求文件已存在** ——
+        /// 待审批的「新增文件」此时还没有落盘，但差异对比仍然要能开起来
+        /// </summary>
+        public static string ResolveInRootAllowMissing(string root, string relativePath)
+        {
             if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(relativePath))
             {
                 return null;
@@ -189,7 +233,7 @@ namespace LangCode.VsIntegration
                     return null;
                 }
 
-                return File.Exists(full) ? full : null;
+                return full;
             }
             catch (Exception)
             {
@@ -201,13 +245,13 @@ namespace LangCode.VsIntegration
         /// 写"修改前"快照名字保留可识别的扩展名（<c>App.before.tsx</c>），
         /// 这样差异窗口里两侧都有正确的语法高亮
         /// </summary>
-        private static string WriteSnapshot(string content, string currentAbsolutePath)
+        private static string WriteSnapshot(string content, string currentAbsolutePath, string suffix = "before")
         {
             Directory.CreateDirectory(DiffDirectory);
 
             var name = Path.GetFileNameWithoutExtension(currentAbsolutePath);
             var extension = Path.GetExtension(currentAbsolutePath);
-            var snapshot = Path.Combine(DiffDirectory, name + ".before" + extension);
+            var snapshot = Path.Combine(DiffDirectory, name + "." + suffix + extension);
 
             File.WriteAllText(snapshot, content ?? string.Empty, new UTF8Encoding(false));
             return snapshot;

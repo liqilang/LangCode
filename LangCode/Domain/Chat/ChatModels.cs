@@ -54,6 +54,11 @@ namespace LangCode.Domain.Chat
         /// </summary>
         CodeCard,
 
+        /// <summary> 
+        /// 点卡片（或文件名）直接在 VS 里打开 —— 对话里只留一条「AI 动过这个文件」的线索
+        /// </summary>
+        FileCard,
+
         /// <summary>
         /// Diff 卡片
         /// </summary>
@@ -324,6 +329,17 @@ namespace LangCode.Domain.Chat
         /// 是否显示 +N/−N 统计（只有真正的差异卡才显示）
         /// </summary>
         public bool ShowsDiffStats => Kind == ChatBlockKind.DiffCard;
+
+        /// <summary>
+        /// 编辑类卡片（DiffCard）的「改动前」全文：点卡片开 VS 差异对比时用。
+        /// 只驻留内存 —— 载入历史会话后为空，届时退回 git HEAD 里的版本作基线
+        /// </summary>
+        public string BeforeText { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 编辑类卡片（DiffCard）的「改动后」全文（未审批时是**提议**的内容）
+        /// </summary>
+        public string AfterText { get; set; } = string.Empty;
 
         /// <summary>
         /// Diff 卡片的「+N」

@@ -40,6 +40,11 @@ namespace LangCode.Agent
         private static readonly Regex FenceRegex = new Regex("```[ \\t]*[Aa][Cc][Tt][Ii][Oo][Nn][ \\t]*\\r?\\n(?<body>[\\s\\S]*?)```", RegexOptions.CultureInvariant);
 
         /// <summary>
+        /// 动作块的**开头** 
+        /// </summary>
+        private static readonly Regex ActionOpenRegex = new Regex("```[ \\t]*[Aa][Cc][Tt][Ii][Oo][Nn][ \\t]*\\r?\\n", RegexOptions.CultureInvariant);
+
+        /// <summary>
         /// 从模型输出里解析出全部动作
         /// </summary>
         public static IList<ToolAction> ExtractActions(string assistantText)
@@ -70,7 +75,37 @@ namespace LangCode.Agent
         }
 
         /// <summary>
-        /// 去掉动作块后的可见文本 
+        /// 流式显示用 
+        /// </summary>
+        public static string StripActionsForDisplay(string assistantText)
+        {
+            if (string.IsNullOrEmpty(assistantText))
+            {
+                return string.Empty;
+            }
+
+            // 先去掉成对的完整动作块
+            var stripped = FenceRegex.Replace(assistantText, string.Empty);
+
+            // 剩下的第一个 ```action 一定没有闭合（成对的已被上面替换掉）：
+            // 从它开始整段切掉；连同紧邻的换行一起吞掉，避免正文底部留下一串空行
+            var open = ActionOpenRegex.Match(stripped);
+            if (open.Success)
+            {
+                var cut = open.Index;
+                while (cut > 0 && (stripped[cut - 1] == '\n' || stripped[cut - 1] == '\r'))
+                {
+                    cut--;
+                }
+
+                stripped = stripped.Substring(0, cut);
+            }
+
+            return stripped.TrimEnd();
+        }
+
+        /// <summary>
+        /// 去掉动作块后的可见文本
         /// </summary>
         public static string StripActions(string assistantText)
         {

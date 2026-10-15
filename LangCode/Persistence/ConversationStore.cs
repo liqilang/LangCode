@@ -973,6 +973,7 @@ namespace LangCode.Persistence
             {
                 case ChatBlockKind.Thinking: return "thinking";
                 case ChatBlockKind.CodeCard: return "code";
+                case ChatBlockKind.FileCard: return "file";
                 case ChatBlockKind.DiffCard: return "diff";
                 case ChatBlockKind.Note: return "note";
                 case ChatBlockKind.Done: return "done";
@@ -989,6 +990,7 @@ namespace LangCode.Persistence
             {
                 case "thinking": return ChatBlockKind.Thinking;
                 case "code": return ChatBlockKind.CodeCard;
+                case "file": return ChatBlockKind.FileCard;
                 case "diff": return ChatBlockKind.DiffCard;
                 case "note": return ChatBlockKind.Note;
                 case "done": return ChatBlockKind.Done;

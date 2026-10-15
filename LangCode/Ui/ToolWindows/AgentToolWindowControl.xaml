@@ -377,9 +377,44 @@
                         -->
                         <DataTemplate x:Key="TextBlockTemplate">
                                 <!-- 头像与步骤标签由外层 AssistantMessageTemplate 统一绘制（每一步一个）；这里只负责正文 -->
-                                <ui:MarkdownView Markdown="{Binding Text}"
-                                                 BaseFontSize="{Binding FontSize, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                 Margin="0,9,0,0"/>
+                                <Grid x:Name="TextBlockRoot"
+                                      Background="Transparent">
+                                        <ui:MarkdownView Markdown="{Binding Text}"
+                                                         BaseFontSize="{Binding FontSize, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                         Margin="0,9,0,0"/>
+                                        <!--
+                                                鼠标经过这一段正文时浮出一个复制按钮：只复制**这一段**，
+                                                与消息底部「整条复制」区分开（读文件 / 编辑文件那些卡片不带这个按钮）
+                                                平时用 Opacity=0 占位，避免出现时把正文挤位移
+                                        -->
+                                        <Button HorizontalAlignment="Right"
+                                                VerticalAlignment="Top"
+                                                Margin="0,11,0,0"
+                                                Click="CopyBlock_Click"
+                                                ToolTip="复制这段文字">
+                                                <Button.Style>
+                                                        <Style TargetType="Button"
+                                                               BasedOn="{StaticResource MsgIconButton}">
+                                                                <Setter Property="Opacity"
+                                                                        Value="0"/>
+                                                                <Setter Property="IsHitTestVisible"
+                                                                        Value="False"/>
+                                                                <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsMouseOver, ElementName=TextBlockRoot}"
+                                                                                     Value="True">
+                                                                                <Setter Property="Opacity"
+                                                                                        Value="1"/>
+                                                                                <Setter Property="IsHitTestVisible"
+                                                                                        Value="True"/>
+                                                                        </DataTrigger>
+                                                                </Style.Triggers>
+                                                        </Style>
+                                                </Button.Style>
+                                                <prim:Icon IconName="copy"
+                                                           Width="12"
+                                                           Height="12"/>
+                                        </Button>
+                                </Grid>
                         </DataTemplate>
 
                         <DataTemplate x:Key="ThinkingBlockTemplate">
@@ -618,13 +653,125 @@
                                 </DataTemplate.Triggers>
                         </DataTemplate>
 
+                        <!--
+                                文件卡（读文件 / 新增文件）：**不在对话里展开内容** ——
+                                点卡片或点文件名直接在 VS 里打开。内容留在编辑器里看，对话只留一条「AI 动过它」的记录
+                        -->
+                        <DataTemplate x:Key="FileCardTemplate">
+                                <Border x:Name="Card"
+                                        Margin="{Binding CardMargin}"
+                                        Background="{DynamicResource Ap.BgCard}"
+                                        BorderBrush="{DynamicResource Ap.ToolBorder}"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Cursor="Hand"
+                                        ToolTip="点击在 Visual Studio 中打开"
+                                        MouseLeftButtonUp="Card_Click">
+                                        <StackPanel>
+                                                <Border Background="Transparent"
+                                                        BorderBrush="{DynamicResource Ap.ToolBorder}"
+                                                        BorderThickness="0,0,0,1"
+                                                        CornerRadius="0"
+                                                        Padding="9,9,11,9">
+                                                        <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="Auto"/>
+                                                                        <ColumnDefinition Width="Auto"/>
+                                                                        <ColumnDefinition Width="*"/>
+                                                                        <ColumnDefinition Width="Auto"/>
+                                                                </Grid.ColumnDefinitions>
+                                                                <prim:Icon Grid.Column="0"
+                                                                           IconName="file"
+                                                                           Width="13"
+                                                                           Height="13"
+                                                                           Foreground="{DynamicResource Ap.FgFaint}"
+                                                                           VerticalAlignment="Center"/>
+                                                                <TextBlock Grid.Column="1"
+                                                                           Text="{Binding Title}"
+                                                                           Margin="6,0,0,0"
+                                                                           FontSize="12"
+                                                                           FontWeight="Medium"
+                                                                           Foreground="{DynamicResource Ap.FgStrong}"
+                                                                           VerticalAlignment="Center"/>
+                                                                <TextBlock Grid.Column="2"
+                                                                           Text="{Binding Path}"
+                                                                           Margin="6,0,0,0"
+                                                                           Style="{StaticResource TdMono}"
+                                                                           Foreground="#FF8B8B8B"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           Cursor="Hand"
+                                                                           ToolTip="点击在 Visual Studio 中打开"
+                                                                           MouseLeftButtonUp="Path_Click"
+                                                                           VerticalAlignment="Center"/>
+                                                                <!-- 明示「这张卡是可点的入口」，不用靠猜 -->
+                                                                <prim:Icon Grid.Column="3"
+                                                                           IconName="external"
+                                                                           Width="12"
+                                                                           Height="12"
+                                                                           Foreground="{DynamicResource Ap.IconDim}"
+                                                                           VerticalAlignment="Center"/>
+                                                        </Grid>
+                                                </Border>
+
+                                                <Border Background="{DynamicResource Ap.FooterBg}"
+                                                        BorderBrush="{DynamicResource Ap.DividerSoft}"
+                                                        BorderThickness="0,1,0,0"
+                                                        Padding="8,6"
+                                                        Visibility="{Binding ShowsFooter, Converter={StaticResource BoolToVis}}">
+                                                        <Grid>
+                                                                <TextBlock Text="等待你在输入框上方确认"
+                                                                           FontSize="11"
+                                                                           VerticalAlignment="Center"
+                                                                           Foreground="{DynamicResource Ap.Accent}"
+                                                                           Visibility="{Binding IsPendingApproval, Converter={StaticResource BoolToVis}}"/>
+                                                                <TextBlock x:Name="Status"
+                                                                           Text="{Binding StatusText}"
+                                                                           HorizontalAlignment="Right"
+                                                                           VerticalAlignment="Center"
+                                                                           FontSize="11"
+                                                                           FontFamily="{DynamicResource Ap.FontCode}"
+                                                                           Foreground="{DynamicResource Ap.Teal}"
+                                                                           Visibility="{Binding StatusText, Converter={StaticResource EmptyToVis}}"/>
+                                                        </Grid>
+                                                </Border>
+                                        </StackPanel>
+                                </Border>
+                                <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding IsAccepted}"
+                                                     Value="True">
+                                                <Setter TargetName="Card"
+                                                        Property="BorderBrush"
+                                                        Value="{DynamicResource Ap.TealBorderSoft}"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsRejected}"
+                                                     Value="True">
+                                                <Setter TargetName="Card"
+                                                        Property="BorderBrush"
+                                                        Value="{DynamicResource Ap.RedBorderSoft}"/>
+                                                <Setter TargetName="Card"
+                                                        Property="Opacity"
+                                                        Value="0.48"/>
+                                                <Setter TargetName="Status"
+                                                        Property="Foreground"
+                                                        Value="{DynamicResource Ap.Red}"/>
+                                        </DataTrigger>
+                                </DataTemplate.Triggers>
+                        </DataTemplate>
+
+                        <!--
+                                编辑 / 新增文件：**不在对话里展开差异** —— 点卡片直接在 VS 里开差异对比
+                                （待审批时看的是「提议的内容」，已应用时看的是落盘后的内容）
+                        -->
                         <DataTemplate x:Key="DiffCardTemplate">
                                 <Border x:Name="Card"
                                         Margin="{Binding CardMargin}"
                                         Background="{DynamicResource Ap.BgCard}"
                                         BorderBrush="{DynamicResource Ap.ToolBorder}"
                                         BorderThickness="1"
-                                        CornerRadius="10">
+                                        CornerRadius="10"
+                                        Cursor="Hand"
+                                        ToolTip="点击在 Visual Studio 中打开"
+                                        MouseLeftButtonUp="Card_Click">
                                         <StackPanel>
                                                 <!-- 扁平头部：与代码卡一致，不铺底色 -->
                                                 <Border Background="Transparent"
@@ -680,39 +827,39 @@
                                                                                    FontFamily="{DynamicResource Ap.FontCode}"
                                                                                    FontSize="11"/>
                                                                 </StackPanel>
-                                                                <ToggleButton Grid.Column="4"
-                                                                              Style="{StaticResource ChevronToggle}"
-                                                                              IsChecked="{Binding IsBodyVisible}"/>
+                                                                <!-- 点整卡／文件名在 VS 里看差异对比，明示这个入口 -->
+                                                                <prim:Icon Grid.Column="4"
+                                                                           IconName="external"
+                                                                           Width="12"
+                                                                           Height="12"
+                                                                           Margin="2,0,0,0"
+                                                                           Foreground="{DynamicResource Ap.IconDim}"
+                                                                           VerticalAlignment="Center"/>
                                                         </Grid>
                                                 </Border>
 
-                                                <StackPanel Visibility="{Binding IsBodyVisible, Converter={StaticResource BoolToVis}}">
-                                                        <ItemsControl ItemsSource="{Binding Lines}"
-                                                                      ItemTemplate="{StaticResource DiffLineTemplate}"
-                                                                      Margin="0,2,0,2"/>
-
-                                                        <Border Background="{DynamicResource Ap.FooterBg}"
-                                                                BorderBrush="{DynamicResource Ap.DividerSoft}"
-                                                                BorderThickness="0,1,0,0"
-                                                                Padding="8,6"
-                                                                Visibility="{Binding ShowsFooter, Converter={StaticResource BoolToVis}}">
-                                                                <Grid>
-                                                                        <TextBlock Text="等待你在输入框上方确认"
-                                                                                   FontSize="11"
-                                                                                   VerticalAlignment="Center"
-                                                                                   Foreground="{DynamicResource Ap.Accent}"
-                                                                                   Visibility="{Binding IsPendingApproval, Converter={StaticResource BoolToVis}}"/>
-                                                                        <TextBlock x:Name="Status"
-                                                                                   Text="{Binding StatusText}"
-                                                                                   HorizontalAlignment="Right"
-                                                                                   VerticalAlignment="Center"
-                                                                                   FontSize="11"
-                                                                                   FontFamily="{DynamicResource Ap.FontCode}"
-                                                                                   Foreground="{DynamicResource Ap.Teal}"
-                                                                                   Visibility="{Binding StatusText, Converter={StaticResource EmptyToVis}}"/>
-                                                                </Grid>
-                                                        </Border>
-                                                </StackPanel>
+                                                <!-- 差异内容不进对话：点卡片直接在 VS 里开差异对比 -->
+                                                <Border Background="{DynamicResource Ap.FooterBg}"
+                                                        BorderBrush="{DynamicResource Ap.DividerSoft}"
+                                                        BorderThickness="0,1,0,0"
+                                                        Padding="8,6"
+                                                        Visibility="{Binding ShowsFooter, Converter={StaticResource BoolToVis}}">
+                                                        <Grid>
+                                                                <TextBlock Text="等待你在输入框上方确认"
+                                                                           FontSize="11"
+                                                                           VerticalAlignment="Center"
+                                                                           Foreground="{DynamicResource Ap.Accent}"
+                                                                           Visibility="{Binding IsPendingApproval, Converter={StaticResource BoolToVis}}"/>
+                                                                <TextBlock x:Name="Status"
+                                                                           Text="{Binding StatusText}"
+                                                                           HorizontalAlignment="Right"
+                                                                           VerticalAlignment="Center"
+                                                                           FontSize="11"
+                                                                           FontFamily="{DynamicResource Ap.FontCode}"
+                                                                           Foreground="{DynamicResource Ap.Teal}"
+                                                                           Visibility="{Binding StatusText, Converter={StaticResource EmptyToVis}}"/>
+                                                        </Grid>
+                                                </Border>
                                         </StackPanel>
                                 </Border>
                                 <DataTemplate.Triggers>
@@ -1035,6 +1182,7 @@
                                                       TextTemplate="{StaticResource TextBlockTemplate}"
                                                       ThinkingTemplate="{StaticResource ThinkingBlockTemplate}"
                                                       CodeTemplate="{StaticResource CodeCardTemplate}"
+                                                      FileTemplate="{StaticResource FileCardTemplate}"
                                                       DiffTemplate="{StaticResource DiffCardTemplate}"
                                                       DoneTemplate="{StaticResource DoneBlockTemplate}"
                                                       TodoTemplate="{StaticResource TodoBlockTemplate}"
@@ -1751,11 +1899,22 @@
                                                              Columns="2"
                                                              HorizontalAlignment="Stretch"/>
 
-                                                <TextBlock Text="最近的会话"
-                                                           FontSize="11"
-                                                           FontWeight="SemiBold"
-                                                           Margin="0,22,0,8"
-                                                           Foreground="{DynamicResource Ap.FgFaint}"/>
+                                                <!-- 标题右侧提供「查看全部」入口：直接跳到历史会话抽屉，省去先点头部历史按钮那一步 -->
+                                                <Grid Margin="0,22,0,8">
+                                                        <TextBlock Text="最近的会话"
+                                                                   FontSize="11"
+                                                                   FontWeight="SemiBold"
+                                                                   HorizontalAlignment="Left"
+                                                                   VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource Ap.FgFaint}"/>
+                                                        <Button x:Name="HomeViewAllHistory"
+                                                                Content="查看全部"
+                                                                Style="{StaticResource LinkButton}"
+                                                                HorizontalAlignment="Right"
+                                                                VerticalAlignment="Center"
+                                                                ToolTip="打开历史会话列表"
+                                                                Click="HomeViewAllHistory_Click"/>
+                                                </Grid>
                                                 <!-- 一个会话一行：标题与元信息都能看全 -->
                                                 <StackPanel x:Name="HomeRecents"/>
                                                 <TextBlock x:Name="HomeEmptyHint"
@@ -2261,7 +2420,7 @@
                                                                                                    VerticalAlignment="Center"/>
                                                                                         <!-- 文案由代码按「已放开几类」动态填写（全部批准 / N 项批准 / 不自动批准） -->
                                                                                         <TextBlock x:Name="AutoChipText"
-                                                                                                   Text="Auto"
+                                                                                                   Text="自动"
                                                                                                    Margin="5,0,0,0"
                                                                                                    FontSize="11.5"
                                                                                                    VerticalAlignment="Center"

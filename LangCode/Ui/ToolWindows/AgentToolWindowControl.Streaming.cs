@@ -191,9 +191,7 @@ namespace LangCode.Ui.ToolWindows
                 // 本步还没有正文块 → 新开一块
                 // **不能复用上一步的**：每步定稿都会整体写回「本轮完整文本」，
                 // 两步共用一块的话后一步会把前一步的正文覆盖掉 —— 看起来就是「前面几步消失了」
-                _turnText ??= ChatSession.BeginText(target);
-
-                _turnText.Text += text;
+                AppendTurnText(target, text);
             }
 
             if (!string.IsNullOrEmpty(text) || !string.IsNullOrEmpty(reasoning))
@@ -251,9 +249,7 @@ namespace LangCode.Ui.ToolWindows
 
             if (!string.IsNullOrEmpty(text))
             {
-                _turnText ??= ChatSession.BeginText(target);
-
-                _turnText.Text += text;
+                AppendTurnText(target, text);
             }
         }
 
@@ -327,7 +323,7 @@ namespace LangCode.Ui.ToolWindows
                 _liveCommandCard = new ChatBlock
                 {
                     Kind = ChatBlockKind.CodeCard,
-                    Title = "Run Command",
+                    Title = "运行命令",
                     IsBodyVisible = true,
                 };
 
