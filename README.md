@@ -143,8 +143,18 @@ MCP 是一套「给 AI 用的工具协议」。你可以在设置里连接各种
 
 ### 安装
 
+**方式一：在 Visual Studio 里直接搜索安装（推荐）**
+
+1. 打开 Visual Studio 2022；
+2. 顶部菜单栏选择 **扩展 → 管理扩展**（Extensions → Manage Extensions）；
+3. 在左侧切换到 **联机 / Online**，在右上角搜索框输入 `LangCode`；
+4. 在搜索结果里找到 **LangCode**，点击 **下载 / 安装**；
+5. 按提示关闭 Visual Studio，安装程序会自动完成安装，重新打开 Visual Studio 即可使用。
+
+**方式二：使用 VSIX 安装包**
+
 1. 下载 / 构建得到 `LangCode.vsix`；
-2. 双击按提示安装；
+2. 双击按提示安装（也可以把 VSIX 放进 `%VSINSTALLDIR%\Common7\IDE\Extensions\` 手动部署）；
 3. 重启 Visual Studio。
 
 ### 配置并使用
