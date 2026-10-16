@@ -607,6 +607,80 @@
                         Value="9,0"/>
         </Style>
 
+        <!-- ==================== 复选框（能力开关 / 自定义 Base URL 开关） ==================== -->
+        <!--
+            必须自带模板与主题前景色：WPF 默认 CheckBox 的模板用的是系统色，
+            深色主题下文字就是黑的 —— 表现是「图像支持 / 提示缓存 / 设置推理等级这些字看不见」
+        -->
+        <Style TargetType="CheckBox">
+                <Setter Property="FontFamily"
+                        Value="{DynamicResource Ap.FontUi}"/>
+                <Setter Property="FontSize"
+                        Value="12.5"/>
+                <Setter Property="Foreground"
+                        Value="{DynamicResource Ap.FgBody}"/>
+                <Setter Property="Cursor"
+                        Value="Hand"/>
+                <Setter Property="FocusVisualStyle"
+                        Value="{x:Null}"/>
+                <Setter Property="VerticalContentAlignment"
+                        Value="Center"/>
+                <Setter Property="Template">
+                        <Setter.Value>
+                                <ControlTemplate TargetType="CheckBox">
+                                        <StackPanel Orientation="Horizontal"
+                                                    Background="Transparent">
+                                                <Border x:Name="Box"
+                                                        Width="15"
+                                                        Height="15"
+                                                        CornerRadius="4"
+                                                        BorderThickness="1"
+                                                        BorderBrush="{DynamicResource Ap.ControlBorder}"
+                                                        Background="{DynamicResource Ap.ControlBg}"
+                                                        VerticalAlignment="Center"
+                                                        SnapsToDevicePixels="True">
+                                                        <Path x:Name="Check"
+                                                              Data="M 2.5,6 L 5.5,9 L 10.5,3"
+                                                              Stroke="{DynamicResource Ap.Accent}"
+                                                              StrokeThickness="1.8"
+                                                              StrokeStartLineCap="Round"
+                                                              StrokeEndLineCap="Round"
+                                                              StrokeLineJoin="Round"
+                                                              Visibility="Collapsed"
+                                                              HorizontalAlignment="Center"
+                                                              VerticalAlignment="Center"/>
+                                                </Border>
+                                                <ContentPresenter Margin="7,0,0,0"
+                                                                  VerticalAlignment="Center"
+                                                                  RecognizesAccessKey="True"/>
+                                        </StackPanel>
+                                        <ControlTemplate.Triggers>
+                                                <Trigger Property="IsChecked"
+                                                         Value="True">
+                                                        <Setter TargetName="Check"
+                                                                Property="Visibility"
+                                                                Value="Visible"/>
+                                                        <Setter TargetName="Box"
+                                                                Property="BorderBrush"
+                                                                Value="{DynamicResource Ap.Accent}"/>
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver"
+                                                         Value="True">
+                                                        <Setter TargetName="Box"
+                                                                Property="BorderBrush"
+                                                                Value="{DynamicResource Ap.Accent}"/>
+                                                </Trigger>
+                                                <Trigger Property="IsEnabled"
+                                                         Value="False">
+                                                        <Setter Property="Opacity"
+                                                                Value="0.5"/>
+                                                </Trigger>
+                                        </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                        </Setter.Value>
+                </Setter>
+        </Style>
+
         <!-- ==================== 下拉框（重写模板，弹层不再出现系统蓝） ==================== -->
         <Style TargetType="ComboBoxItem">
                 <Setter Property="FontFamily"

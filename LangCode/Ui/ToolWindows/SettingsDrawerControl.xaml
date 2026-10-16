@@ -618,6 +618,15 @@
                         </StackPanel>
 
                         <!--
+                            自定义模型的「能力与价格」（仅 OpenAI 兼容端点）：由代码填充。
+                            放在「模型参数」之后 —— 它与上下文窗口 / 最大输出是同一条线，
+                            紧跟着看才顺（以前排在提供商字段里，要翻到上面才找得到）
+                        -->
+                        <StackPanel x:Name="CapabilitiesFieldsPanel"
+                                    Margin="0,0,0,22"
+                                    Visibility="Collapsed"/>
+
+                        <!--
                             ══════ 模型高级选项 ══════
                              「模型高级选项」：推理强度 / 回答详细度 / 思考预算
                             一律「留空或 0 = 不带该字段」，默认完全不影响兼容性；只有用户显式设置才发送
@@ -827,8 +836,9 @@
                                             Margin="0,0,10,0">
                                     <TextBlock Text="检查点（Checkpoints）"
                                                Style="{StaticResource TdToggleName}"/>
-                                    <TextBlock Text="每次修改后创建可回滚的快照，占用少量磁盘空间"
-                                               Style="{StaticResource TdToggleDesc}"/>
+                                    <TextBlock Text="每轮对话开始（AI 动手改文件前）创建可回滚的快照：消息上会出现「还原到此处」，点一下就能把文件退回到那一刻；占用少量磁盘空间"
+                                               Style="{StaticResource TdToggleDesc}"
+                                               TextWrapping="Wrap"/>
                                 </StackPanel>
                                 <ToggleButton Grid.Column="1"
                                               Style="{StaticResource Switch}"

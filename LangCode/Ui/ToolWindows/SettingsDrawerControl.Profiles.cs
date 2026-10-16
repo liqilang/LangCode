@@ -337,8 +337,9 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
-            // 先把旧厂商的 Key / Base URL 存回它的档案，再装入新厂商的档案
-            Settings.SwitchProvider(provider);
+            // 先把旧厂商的 Key / Base URL / 限额存回它的档案，再装入新厂商的档案
+            // 返回值 = 新厂商档案里存过自己的限额（各家互不串）
+            var limitsFromProfile = Settings.SwitchProvider(provider);
 
             _binding = true;
             try
@@ -346,12 +347,19 @@ namespace LangCode.Ui.ToolWindows
                 // 1:1 对齐 Zoo：切厂商时，若当前模型对新厂商非法，则重置为该厂商默认模型
                 ResetModelForProvider(Settings.Provider);
 
+                // 档案里没存过限额（第一次用这个厂商 / 老档案）才按新模型的能力带出；
+                // 存过就用档案自己的 —— 否则 A 的 1M 会串到 B，B 改 128K 又会串回 A
+                if (!limitsFromProfile)
+                {
+                    Settings.AlignLimitsToModel(Settings.Model);
+                }
+
                 BindModelList(Settings.Provider);
                 RenderProviderFields();
                 UpdateModelInfoLine();
 
-                // 模型换了（或重置为该厂商默认）：上下文窗口 / 最大输出一起对齐
-                SelectContextWindow(Settings.ContextWindow);
+                // 上下文档位跟着模型容量重排（模型容量不在固定档位里时就补一条），并选中它
+                BindContextOptions(Settings.ContextWindow);
                 SyncMaxOutputField();
 
                 // 高级选项也随厂商档案一起切换
@@ -430,6 +438,10 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
+            // 真的换了模型才动限额：同一个模型被重新提交一次（回车 / 失焦）时，
+            // 不该把用户自己调过的上下文窗口按"模型能力"改回去
+            var modelChanged = !string.Equals(modelId, Settings.Model, StringComparison.OrdinalIgnoreCase);
+
             Settings.Model = modelId;
             Settings.StoreActiveProfile();
 
@@ -444,11 +456,15 @@ namespace LangCode.Ui.ToolWindows
                     SetModel.Text = DisplayNameOf(modelId);
                 }
 
+                // 选中模型后：上下文窗口 / 最大输出按该模型的真实能力自动带出
+                if (modelChanged)
+                {
+                    Settings.AlignLimitsToModel(modelId);
+                }
+
                 UpdateModelInfoLine();
 
-                // 选中模型后：上下文窗口 / 最大输出都按该模型的真实能力自动带出
-                Settings.AlignLimitsToModel(modelId);
-                SelectContextWindow(Settings.ContextWindow);
+                BindContextOptions(Settings.ContextWindow);
                 SyncMaxOutputField();
             }
             finally

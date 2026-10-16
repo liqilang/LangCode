@@ -678,6 +678,35 @@ namespace LangCode.Domain.Chat
             set { Set(ref _isQueued, value); }
         }
 
+        private string _checkpointId = string.Empty;
+
+        /// <summary>
+        /// 这条消息发出<b>之前</b>工作区的检查点 id（"时间旅行"的落点）。
+        /// 每轮开始时打一个点挂在这条用户消息上，消息上的还原按钮据此把文件退回去。
+        /// 随会话一起落盘，重开 VS 后按钮依然可用（检查点在影子仓库里长期保留）
+        /// </summary>
+        public string CheckpointId
+        {
+            get { return _checkpointId; }
+            set
+            {
+                if (Set(ref _checkpointId, value ?? string.Empty))
+                {
+                    Raise(nameof(HasCheckpoint));
+                }
+            }
+        }
+
+        /// <summary>
+        /// 有检查点：操作栏上出现「还原到此处」（关掉检查点功能 / 老会话里没有这个点时为 false）
+        /// </summary>
+        public bool HasCheckpoint => _checkpointId.Length > 0;
+
+        /// <summary>
+        /// 检查点的短 id（提示文案用）
+        /// </summary>
+        public string CheckpointShortId => _checkpointId.Length > 7 ? _checkpointId.Substring(0, 7) : _checkpointId;
+
         private bool _isEditing;
         private string _editText = string.Empty;
 

@@ -137,21 +137,22 @@ namespace LangCode.Ui.ToolWindows
 
         private void New_Click(object sender, RoutedEventArgs e) => NewConversationRequested?.Invoke(this, EventArgs.Empty);
 
-        private void Clear_Click(object sender, RoutedEventArgs e)
+        private async void Clear_Click(object sender, RoutedEventArgs e)
         {
             if (_session == null || _session.History.Count == 0)
             {
                 return;
             }
 
-            // 清空是不可撤销的，先确认 
-            var answer = MessageBox.Show(
+            // 清空是不可撤销的，先确认
+            var confirmed = await Controls.InWindowDialog.ConfirmAsync(
+                sender as FrameworkElement,
+                "清空历史会话",
                 "确定清空全部历史会话吗？该操作不可撤销",
-                "LangCode",
-                MessageBoxButton.OKCancel,
-                MessageBoxImage.Warning);
+                confirmText: "清空",
+                iconName: "trash");
 
-            if (answer != MessageBoxResult.OK)
+            if (!confirmed)
             {
                 return;
             }
@@ -212,7 +213,7 @@ namespace LangCode.Ui.ToolWindows
             BtnMulti.SetResourceReference(Control.ForegroundProperty, "Ap.IconMuted");
         }
 
-        private void DeleteSelected_Click(object sender, RoutedEventArgs e)
+        private async void DeleteSelected_Click(object sender, RoutedEventArgs e)
         {
             if (_session == null)
             {
@@ -226,13 +227,14 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
-            var answer = MessageBox.Show(
+            var confirmed = await Controls.InWindowDialog.ConfirmAsync(
+                sender as FrameworkElement,
+                "删除选中的会话",
                 "确定删除选中的 " + ids.Count + " 个会话吗？该操作不可撤销",
-                "LangCode",
-                MessageBoxButton.OKCancel,
-                MessageBoxImage.Warning);
+                confirmText: "删除",
+                iconName: "trash");
 
-            if (answer != MessageBoxResult.OK)
+            if (!confirmed)
             {
                 return;
             }
@@ -275,11 +277,36 @@ namespace LangCode.Ui.ToolWindows
             MultiCount.Text = "已选 " + count + " 项";
         }
 
-        private void Delete_Click(object sender, RoutedEventArgs e)
+        private async void Delete_Click(object sender, RoutedEventArgs e)
         {
+            // 这枚按钮嵌在"整行可点"的载入按钮里，Click 会继续往上冒泡到那一行 ——
+            // 不拦下来的话，不管点确定还是取消，行上的 Item_Click 都会把会话载入一次
+            // （弹框只是把这件事延后到用户点完按钮之后，所以看起来像"点取消反而打开了会话"）
+            e.Handled = true;
+
             // 删除按钮在条目模板内部，DataContext 就是那一行的 Summary
             var summary = (sender as FrameworkElement)?.DataContext as ConversationSummary;
             if (summary == null || _session == null)
+            {
+                return;
+            }
+
+            // 单条删除同样不可撤销：先把标题写出来让用户确认删的是哪一条
+            // （多选 / 清空都有确认框，这里少一个就会"点一下会话就没了"）
+            var title = string.IsNullOrWhiteSpace(summary.Title) ? "未命名会话" : summary.Title.Trim();
+            if (title.Length > 40)
+            {
+                title = title.Substring(0, 40) + "…";
+            }
+
+            var confirmed = await Controls.InWindowDialog.ConfirmAsync(
+                sender as FrameworkElement,
+                "删除会话",
+                "确定删除会话「" + title + "」吗？该操作不可撤销",
+                confirmText: "删除",
+                iconName: "trash");
+
+            if (!confirmed)
             {
                 return;
             }

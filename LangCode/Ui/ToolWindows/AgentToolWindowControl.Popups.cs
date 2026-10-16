@@ -249,9 +249,8 @@ namespace LangCode.Ui.ToolWindows
 
             _session.CurrentModel = _settings.Model;
 
-            // 档案里存的是模型 id：切过来后按该模型对齐上下文窗口 / 最大输出
-            _settings.AlignLimitsToModel(_settings.Model);
-
+            // 限额随档案一起恢复（ApplyNamedProfile 已处理：档案里存过就用档案的，
+            // 老档案才按模型能力带出）—— 这里不要再按模型对齐一次，否则会把档案里的值改掉
             _session.ContextWindow = _settings.ContextWindow;
             SettingsStore.Save(_settings);
 
@@ -365,6 +364,9 @@ namespace LangCode.Ui.ToolWindows
                 .FirstOrDefault(g => g.Models.Any(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase)))
                 ?.Provider;
 
+            // 点的是当前这个模型时不改限额（等价于"再看一眼"），只有真的换了模型才按模型能力带出
+            var modelChanged = !string.Equals(modelId, _settings.Model, StringComparison.OrdinalIgnoreCase);
+
             _settings.SwitchProvider(string.IsNullOrWhiteSpace(provider) ? _settings.Provider : provider, modelId);
 
             // 选了具体模型 = 离开命名档案：档案代表「一整套配置」，
@@ -374,7 +376,10 @@ namespace LangCode.Ui.ToolWindows
             _session.CurrentModel = _settings.Model;
 
             // 上下文窗口 / 最大输出跟随模型真实能力（令牌条分母与单次输出上限一起带出）
-            _settings.AlignLimitsToModel(modelId);
+            if (modelChanged)
+            {
+                _settings.AlignLimitsToModel(modelId);
+            }
 
             _session.ContextWindow = _settings.ContextWindow;
             UpdateTokens();

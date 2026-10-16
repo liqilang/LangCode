@@ -425,7 +425,7 @@ namespace LangCode.Ui.ToolWindows
         /// 从其他工具的 <c>mcpServers</c> 配置里导入服务器
         /// 结构是 <c>"名字": { "command": "...", "args": [ ... ] }</c>，用正则就地取即可
         /// </summary>
-        private void McpImport_Click(object sender, RoutedEventArgs e)
+        private async void McpImport_Click(object sender, RoutedEventArgs e)
         {
             var dialog = new OpenFileDialog
             {
@@ -439,6 +439,8 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
+            var host = sender as FrameworkElement;
+
             string json;
             try
             {
@@ -446,18 +448,17 @@ namespace LangCode.Ui.ToolWindows
             }
             catch (Exception ex)
             {
-                MessageBox.Show("读取失败：" + ex.Message, "LangCode", MessageBoxButton.OK, MessageBoxImage.Warning);
+                await Controls.InWindowDialog.InfoAsync(host, "读取失败", ex.Message, iconName: "problem").ConfigureAwait(true);
                 return;
             }
 
             var imported = McpConfig.Parse(json);
             if (imported.Count == 0)
             {
-                MessageBox.Show(
-                    "没有解析出服务器期望的格式：\n{\n  \"mcpServers\": {\n    \"名字\": { \"command\": \"npx\", \"args\": [\"-y\", \"@xxx/server\"] }\n  }\n}",
-                    "LangCode",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                await Controls.InWindowDialog.InfoAsync(
+                    host,
+                    "格式不匹配",
+                    "没有解析出服务器期望的格式：\n{\n  \"mcpServers\": {\n    \"名字\": { \"command\": \"npx\", \"args\": [\"-y\", \"@xxx/server\"] }\n  }\n}").ConfigureAwait(true);
                 return;
             }
 
@@ -467,7 +468,7 @@ namespace LangCode.Ui.ToolWindows
             PersistMcp();
             BuildMcpRows();
 
-            MessageBox.Show("已导入 " + count + " 个 MCP 服务器", "LangCode", MessageBoxButton.OK, MessageBoxImage.Information);
+            await Controls.InWindowDialog.InfoAsync(host, "导入完成", "已导入 " + count + " 个 MCP 服务器", iconName: "check").ConfigureAwait(true);
         }
     }
 }

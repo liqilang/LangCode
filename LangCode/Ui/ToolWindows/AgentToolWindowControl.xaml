@@ -364,6 +364,19 @@
                                                                            Width="12"
                                                                            Height="12"/>
                                                         </Button>
+                                                        <!--
+                                                            检查点还原：把文件退回这条消息发出之前。
+                                                            没有检查点的消息（关掉检查点功能 / 老会话）不显示这个按钮
+                                                        -->
+                                                        <Button Style="{StaticResource MsgIconButton}"
+                                                                Margin="2,0,0,0"
+                                                                Click="RestoreCheckpoint_Click"
+                                                                ToolTip="把工作区文件还原到这条消息发出之前（检查点；对话记录保持不变）"
+                                                                Visibility="{Binding HasCheckpoint, Converter={StaticResource BoolToVis}}">
+                                                                <prim:Icon IconName="undo"
+                                                                           Width="12"
+                                                                           Height="12"/>
+                                                        </Button>
                                                 </StackPanel>
                                         </StackPanel>
                                 </Grid>
@@ -379,22 +392,34 @@
                                 <!-- 头像与步骤标签由外层 AssistantMessageTemplate 统一绘制（每一步一个）；这里只负责正文 -->
                                 <Grid x:Name="TextBlockRoot"
                                       Background="Transparent">
-                                        <ui:MarkdownView Markdown="{Binding Text}"
+                                        <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <ui:MarkdownView Grid.Row="0"
+                                                         Markdown="{Binding Text}"
                                                          BaseFontSize="{Binding FontSize, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                                          Margin="0,9,0,0"/>
+
                                         <!--
-                                                鼠标经过这一段正文时浮出一个复制按钮：只复制**这一段**，
-                                                与消息底部「整条复制」区分开（读文件 / 编辑文件那些卡片不带这个按钮）
-                                                平时用 Opacity=0 占位，避免出现时把正文挤位移
+                                                复制**这一段**：独占一行放在正文的右下角 ——
+                                                压在正文上的浮层会把最后一行字折掉，所以这里给它单独一行，绝不重叠
+                                                鼠标经过这一段正文才出现（不占视线）
                                         -->
-                                        <Button HorizontalAlignment="Right"
-                                                VerticalAlignment="Top"
-                                                Margin="0,11,0,0"
+                                        <Button Grid.Row="1"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Center"
+                                                Margin="0,1,1,0"
                                                 Click="CopyBlock_Click"
                                                 ToolTip="复制这段文字">
                                                 <Button.Style>
                                                         <Style TargetType="Button"
                                                                BasedOn="{StaticResource MsgIconButton}">
+                                                                <Setter Property="Width"
+                                                                        Value="20"/>
+                                                                <Setter Property="Height"
+                                                                        Value="20"/>
                                                                 <Setter Property="Opacity"
                                                                         Value="0"/>
                                                                 <Setter Property="IsHitTestVisible"
@@ -432,23 +457,26 @@
                                                               Background="Transparent"
                                                               MouseLeftButtonUp="ThinkingHeader_Click"
                                                               ToolTip="点击展开 / 收起这一步的思考">
+                                                                <!--
+                                                                        箭头统一放**右边**：与其它卡片（代码卡 / 差异卡）的折叠箭头同侧，
+                                                                        一眼就能看出「这一行也能展开」，不用在两处找箭头
+                                                                -->
                                                                 <Grid.ColumnDefinitions>
-                                                                        <ColumnDefinition Width="Auto"/>
                                                                         <ColumnDefinition Width="*"/>
+                                                                        <ColumnDefinition Width="Auto"/>
                                                                 </Grid.ColumnDefinitions>
 
-                                                                <ToggleButton Grid.Column="0"
+                                                                <TextBlock Grid.Column="0"
+                                                                           Text="{Binding ThinkingLabel}"
+                                                                           FontSize="11.5"
+                                                                           Foreground="{DynamicResource Ap.FgDim}"
+                                                                           VerticalAlignment="Center"/>
+
+                                                                <ToggleButton Grid.Column="1"
                                                                               Style="{StaticResource ChevronToggle}"
                                                                               IsChecked="{Binding IsBodyVisible}"
                                                                               IsHitTestVisible="False"
                                                                               VerticalAlignment="Center"/>
-
-                                                                <TextBlock Grid.Column="1"
-                                                                           Text="{Binding ThinkingLabel}"
-                                                                           Margin="4,0,0,0"
-                                                                           FontSize="11.5"
-                                                                           Foreground="{DynamicResource Ap.FgDim}"
-                                                                           VerticalAlignment="Center"/>
                                                         </Grid>
                                                 </Border>
 
@@ -524,7 +552,14 @@
                                                         BorderThickness="0,0,0,1"
                                                         CornerRadius="0"
                                                         Padding="9,9,11,9">
-                                                        <Grid>
+                                                        <!--
+                                                                头部整行可点 = 展开 / 收起这张卡片（不必非去点右边那个小箭头）；
+                                                                只有卡片名字 / 路径例外 —— 点它们是「在 VS 里打开这个文件」
+                                                        -->
+                                                        <Grid Cursor="Hand"
+                                                              Background="Transparent"
+                                                              MouseLeftButtonUp="CodeCardHeader_Click"
+                                                              ToolTip="点击展开 / 收起这张卡片的内容">
                                                                 <Grid.ColumnDefinitions>
                                                                         <ColumnDefinition Width="Auto"/>
                                                                         <ColumnDefinition Width="Auto"/>
@@ -537,13 +572,17 @@
                                                                            Height="13"
                                                                            Foreground="{DynamicResource Ap.FgFaint}"
                                                                            VerticalAlignment="Center"/>
+                                                                <!-- 点名字 = 打开文件（同点路径） -->
                                                                 <TextBlock Grid.Column="1"
                                                                            Text="{Binding Title}"
                                                                            Margin="6,0,0,0"
                                                                            FontSize="12"
                                                                            FontWeight="Medium"
                                                                            Foreground="{DynamicResource Ap.FgStrong}"
-                                                                           VerticalAlignment="Center"/>
+                                                                           VerticalAlignment="Center"
+                                                                           Cursor="Hand"
+                                                                           ToolTip="点击在 Visual Studio 中打开"
+                                                                           MouseLeftButtonUp="Path_Click"/>
                                                                 <!-- 点击路径直接在 VS 里打开（有行号就跳过去） -->
                                                                 <TextBlock Grid.Column="2"
                                                                            Text="{Binding Path}"
@@ -555,9 +594,11 @@
                                                                            ToolTip="点击在 Visual Studio 中打开"
                                                                            MouseLeftButtonUp="Path_Click"
                                                                            VerticalAlignment="Center"/>
+                                                                <!-- 箭头只当指示器：命中统一交给整行，避免一次点击被处理两遍 -->
                                                                 <ToggleButton Grid.Column="3"
                                                                               Style="{StaticResource ChevronToggle}"
-                                                                              IsChecked="{Binding IsBodyVisible}"/>
+                                                                              IsChecked="{Binding IsBodyVisible}"
+                                                                              IsHitTestVisible="False"/>
                                                         </Grid>
                                                 </Border>
 
@@ -599,10 +640,13 @@
                                                         「允许 / 拒绝」统一搬到输入框上方的请求条：待批的卡片可能在滚动区外，
                                                         按钮跟着卡片跑反而点不到；而且一次只可能有一个动作在等拍板
                                                 -->
+                                                <!-- 底栏同样是「点一下展开 / 收起」的命中区（整张卡的"留白"都可点，不必瞄准箭头） -->
                                                 <Border Background="{DynamicResource Ap.FooterBg}"
                                                         BorderBrush="{DynamicResource Ap.DividerSoft}"
                                                         BorderThickness="0,1,0,0"
                                                         Padding="8,6"
+                                                        Cursor="Hand"
+                                                        MouseLeftButtonUp="CodeCardHeader_Click"
                                                         Visibility="{Binding ShowsFooter, Converter={StaticResource BoolToVis}}">
                                                         <Grid>
                                                                 <TextBlock Text="等待你在输入框上方确认"
@@ -1238,37 +1282,11 @@
                                                         继续任务 / 重试 / 撤销修改 **不再固定挂在消息下面**：
                                                         它们按需出现在输入框上方的请求条上（判定逻辑见 Models/RequestBar.cs），
                                                         任务正常跑完时什么按钮都不显示
-                                                -->
 
-                                                <!-- 消息操作：复制 —— 鼠标经过这条回复才出现 -->
-                                                <StackPanel Orientation="Horizontal"
-                                                            HorizontalAlignment="Left"
-                                                            Margin="0,5,0,0">
-                                                        <StackPanel.Style>
-                                                                <Style TargetType="StackPanel">
-                                                                        <Setter Property="Opacity"
-                                                                                Value="0"/>
-                                                                        <Setter Property="IsHitTestVisible"
-                                                                                Value="False"/>
-                                                                        <Style.Triggers>
-                                                                                <DataTrigger Binding="{Binding IsMouseOver, ElementName=AssistantMsgRoot}"
-                                                                                             Value="True">
-                                                                                        <Setter Property="Opacity"
-                                                                                                Value="1"/>
-                                                                                        <Setter Property="IsHitTestVisible"
-                                                                                                Value="True"/>
-                                                                                </DataTrigger>
-                                                                        </Style.Triggers>
-                                                                </Style>
-                                                        </StackPanel.Style>
-                                                        <Button Style="{StaticResource MsgIconButton}"
-                                                                Click="CopyMessage_Click"
-                                                                ToolTip="复制这条回复的内容">
-                                                                <prim:Icon IconName="copy"
-                                                                           Width="12"
-                                                                           Height="12"/>
-                                                        </Button>
-                                                </StackPanel>
+                                                        整条回复的复制入口也不在这里了：正文里**每一段**各自带一个
+                                                        （见 TextBlockTemplate），放在那一段的右下角，鼠标经过那一段才出现 ——
+                                                        固定在消息底部的话，长回复要滚到最后才能看到，短回复又会和分段按钮重合
+                                                -->
                                         </StackPanel>
                                 </Grid>
                         </DataTemplate>

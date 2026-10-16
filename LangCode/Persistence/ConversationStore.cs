@@ -45,6 +45,12 @@ namespace LangCode.Persistence
         public string Role { get; set; } = "assistant";
 
         /// <summary>
+        /// 这条消息发出之前的检查点 id（用户消息才有）：重开会话后「还原到此处」依然可用
+        /// </summary>
+        [DataMember(Name = "checkpoint", Order = 4)]
+        public string CheckpointId { get; set; } = string.Empty;
+
+        /// <summary>
         /// 用户消息的正文（助手消息用 blocks）
         /// </summary>
         [DataMember(Name = "text", Order = 2)]
@@ -825,6 +831,7 @@ namespace LangCode.Persistence
             {
                 Role = message.Role,
                 Text = message.IsUser ? message.Text : string.Empty,
+                CheckpointId = message.IsUser ? message.CheckpointId : string.Empty,
             };
 
             if (!message.IsUser)
@@ -842,6 +849,7 @@ namespace LangCode.Persistence
                 Role = stored.Role,
                 Model = model,
                 Text = stored.Text ?? string.Empty,
+                CheckpointId = stored.CheckpointId ?? string.Empty,
             };
 
             foreach (var block in stored.Blocks ?? [])

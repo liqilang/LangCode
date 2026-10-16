@@ -31,7 +31,7 @@ namespace LangCode.Ui.ToolWindows
         // ============================================================
         // 导出 / 导入 / 重置
         // ============================================================
-        private void Export_Click(object sender, RoutedEventArgs e)
+        private async void Export_Click(object sender, RoutedEventArgs e)
         {
             var dialog = new SaveFileDialog
             {
@@ -46,11 +46,12 @@ namespace LangCode.Ui.ToolWindows
             }
 
             var error = SettingsStore.Export(Settings, dialog.FileName);
-            MessageBox.Show(
-                error == null ? "已导出到：\n" + dialog.FileName : "导出失败：" + error,
-                "LangCode",
-                MessageBoxButton.OK,
-                error == null ? MessageBoxImage.Information : MessageBoxImage.Warning);
+
+            await Controls.InWindowDialog.InfoAsync(
+                this,
+                error == null ? "导出完成" : "导出失败",
+                error == null ? "已导出到：\n" + dialog.FileName : error,
+                iconName: error == null ? "check" : "problem").ConfigureAwait(true);
         }
 
         // ============================================================
@@ -94,7 +95,7 @@ namespace LangCode.Ui.ToolWindows
             }
         }
 
-        private void Import_Click(object sender, RoutedEventArgs e)
+        private async void Import_Click(object sender, RoutedEventArgs e)
         {
             var dialog = new OpenFileDialog
             {
@@ -111,7 +112,7 @@ namespace LangCode.Ui.ToolWindows
             var imported = SettingsStore.Import(dialog.FileName, out var error);
             if (imported == null)
             {
-                MessageBox.Show("导入失败：" + error, "LangCode", MessageBoxButton.OK, MessageBoxImage.Warning);
+                await Controls.InWindowDialog.InfoAsync(this, "导入失败", error, iconName: "problem").ConfigureAwait(true);
                 return;
             }
 
@@ -130,18 +131,21 @@ namespace LangCode.Ui.ToolWindows
 
             RaiseChanged();
 
-            MessageBox.Show("设置已导入，点击「保存」后生效", "LangCode", MessageBoxButton.OK, MessageBoxImage.Information);
+            await Controls.InWindowDialog
+                .InfoAsync(this, "导入完成", "设置已导入，点击「保存」后生效", iconName: "check")
+                .ConfigureAwait(true);
         }
 
-        private void Reset_Click(object sender, RoutedEventArgs e)
+        private async void Reset_Click(object sender, RoutedEventArgs e)
         {
-            var answer = MessageBox.Show(
+            var confirmed = await Controls.InWindowDialog.ConfirmAsync(
+                this,
+                "恢复出厂设置",
                 "确定把所有设置恢复为出厂状态吗？\n（API Key、自定义指令、MCP 服务器列表都会被清空）",
-                "LangCode",
-                MessageBoxButton.OKCancel,
-                MessageBoxImage.Warning);
+                confirmText: "恢复",
+                iconName: "problem").ConfigureAwait(true);
 
-            if (answer != MessageBoxResult.OK)
+            if (!confirmed)
             {
                 return;
             }

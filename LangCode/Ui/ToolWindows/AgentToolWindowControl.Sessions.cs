@@ -107,20 +107,21 @@ namespace LangCode.Ui.ToolWindows
         /// <summary>
         /// 删除当前会话（删除后开一个新的空会话）
         /// </summary>
-        private void DeleteSession_Click(object sender, RoutedEventArgs e)
+        private async void DeleteSession_Click(object sender, RoutedEventArgs e)
         {
             if (_session.IsBusy)
             {
                 StopCurrent();
             }
 
-            var answer = MessageBox.Show(
+            var confirmed = await Controls.InWindowDialog.ConfirmAsync(
+                sender as FrameworkElement,
+                "删除当前会话",
                 "确定删除当前会话吗？删除后无法恢复。",
-                "LangCode",
-                MessageBoxButton.OKCancel,
-                MessageBoxImage.Warning);
+                confirmText: "删除",
+                iconName: "trash");
 
-            if (answer != MessageBoxResult.OK)
+            if (!confirmed)
             {
                 return;
             }

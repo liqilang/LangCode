@@ -405,7 +405,7 @@ namespace LangCode.Ui.ToolWindows
         }
 
         /// <summary>
-        /// 复制**一段**助手正文（鼠标经过正文时浮出的那个小图标）：只复制这一段，不夹带其它卡片
+        /// 复制**一段**助手正文（正文右下角那个小图标）：只复制这一段，不夹带其它卡片
         /// </summary>
         private void CopyBlock_Click(object sender, RoutedEventArgs e)
         {
@@ -459,6 +459,63 @@ namespace LangCode.Ui.ToolWindows
             {
                 ShowSessionActionHint("复制失败");
             }
+        }
+
+        /// <summary>
+        /// 把工作区文件还原到这条用户消息发出<b>之前</b>的状态（检查点）。
+        /// 只动磁盘上的文件，对话记录保持不动 —— 想连对话一起退回，
+        /// 用「编辑并重新发送」或「分叉」；想全面回滚，用请求条上的「撤销本轮」
+        /// </summary>
+        private async void RestoreCheckpoint_Click(object sender, RoutedEventArgs e)
+        {
+            var message = (sender as FrameworkElement)?.DataContext as ChatMessage;
+            if (message == null || !message.HasCheckpoint)
+            {
+                return;
+            }
+
+            if (_session.IsBusy)
+            {
+                AddNote("正在生成中，等这一轮结束后再还原检查点");
+                return;
+            }
+
+            var store = EnsureCheckpoints();
+            if (store == null || !store.IsAvailable)
+            {
+                AddNote("检查点不可用：请在「设置 → 编辑器」里打开「检查点（Checkpoints）」，并确认环境里能调用 git");
+                return;
+            }
+
+            var confirmed = await Controls.InWindowDialog.ConfirmAsync(
+                sender as FrameworkElement,
+                "还原到检查点 " + message.CheckpointShortId,
+                "把工作区文件还原到这条消息发出之前吗？\n\n" +
+                "「" + FirstLineOf(message.Text) + "」\n\n" +
+                "· 此后 AI 对文件的改动都会被覆盖掉（未跟踪的新建文件保留原样）\n" +
+                "· 对话记录不受影响，仍保留在这里\n" +
+                "· 该操作不可撤销",
+                confirmText: "还原",
+                iconName: "undo");
+
+            if (!confirmed)
+            {
+                return;
+            }
+
+            var id = message.CheckpointId;
+            var result = await Task.Run(() => store.Restore(id)).ConfigureAwait(true);
+
+            // await 之后可能落在后台线程：接下来要往界面里写卡片，先切回主线程
+            await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            AddNote(result != null && result.Ok
+                ? "已把工作区还原到「" + FirstLineOf(message.Text) + "」之前 · 检查点 " + message.CheckpointShortId
+                : "还原失败：" + (result?.Output ?? "检查点不可用"));
+
+            RefreshRequestBar();
+            UpdateTokens();
+            ScrollToEnd();
         }
 
         /// <summary>

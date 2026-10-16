@@ -362,6 +362,9 @@ namespace LangCode.Domain.Catalog
                 SignInNote = "ChatGPT Plus/Pro 走 OAuth 订阅通道（非 API Key）",
             });
 
+            // 通用 OpenAI 兼容端点：**不提供 Azure API 版本** —— 它不是 Azure OpenAI 专用入口，
+            // 摆一个永远用不上的字段只会让人以为「这里要填 Azure」；真正走 Azure 的网关
+            // 用 Base URL 里的 api-version 查询参数即可
             Add(new ProviderFormSpec
             {
                 Provider = "OpenAI Compatible",
@@ -370,10 +373,6 @@ namespace LangCode.Domain.Catalog
                 BaseUrlMode = ProviderBaseUrlMode.Plain,
                 BaseUrlLabel = "Base URL",
                 BaseUrlPlaceholder = "https://api.example.com",
-                Extras =
-                [
-                    new ProviderFieldSpec { Key = "azureApiVersion", Label = "Azure API 版本（可选）", Placeholder = "2024-10-01-preview" },
-                ],
             });
 
             Add(new ProviderFormSpec

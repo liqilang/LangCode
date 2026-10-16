@@ -90,6 +90,12 @@ namespace LangCode.Ui.ToolWindows
             16384, 32768, 65536, 131072, 204800, 262144, 400000, 1048576, 1050000, 2000000,
         ];
 
+        /// <summary>
+        /// 当前下拉里真正可选的档位：固定档位 + 当前模型的真实容量
+        /// （模型容量不在固定档位里就补一条，见 <see cref="BindContextOptions"/>）
+        /// </summary>
+        private readonly List<int> _ctxOptions = new List<int>(ContextOptions);
+
         public SettingsDrawerControl()
         {
             InitializeComponent();
@@ -390,16 +396,22 @@ namespace LangCode.Ui.ToolWindows
                 BindModelList(Settings.Provider);
                 RenderProviderFields();
 
-                // 打开设置时按当前模型对齐「上下文窗口 / 最大输出」（模型已知容量才改写）
-                Settings.AlignLimitsToModel(Settings.Model);
+                // 打开设置时：只有限额还是出厂默认（= 从没配过）才按当前模型带出。
+                // 已经存过的值（用户调过的 / 档案里恢复出来的）一律不动 ——
+                // 否则打开一次就把这套配置的窗口改写成"模型能力"，
+                // 两套配置之间也会互相串（A 的 1M ↔ B 的 128K）
+                if (Settings.LimitsAreDefault())
+                {
+                    Settings.AlignLimitsToModel(Settings.Model);
+                }
+
                 UpdateModelInfoLine();
 
                 // 模型高级选项（推理强度 / 详细度）
                 SelectAdvanced(SetReasoningEffort, Settings.ReasoningEffort);
                 SelectAdvanced(SetVerbosity, Settings.Verbosity);
 
-                SetCtxWindow.ItemsSource = ContextOptions.Select(ModelCatalog.FormatTokens).ToList();
-                SelectContextWindow(Settings.ContextWindow);
+                BindContextOptions(Settings.ContextWindow);
 
                 // 通用 / 高级两个分页上的开关、下拉、文本框（按 Tag 反射对齐）
                 BindTaggedFields();
@@ -419,23 +431,28 @@ namespace LangCode.Ui.ToolWindows
         // ============================================================
         // 抽屉骨架
         // ============================================================
-        private void Back_Click(object sender, RoutedEventArgs e)
+        private async void Back_Click(object sender, RoutedEventArgs e)
         {
             // 有未保存的改动先拦一下：避免「以为存过了」其实没存就关了
             if (HasUnsavedChanges())
             {
-                var answer = MessageBox.Show(
-                    "有未保存的更改。是否保存后关闭？\n\n是：保存并关闭\n否：放弃更改并关闭\n取消：留在设置页",
-                    "LangCode",
-                    MessageBoxButton.YesNoCancel,
-                    MessageBoxImage.Question);
+                var choice = await Controls.InWindowDialog.ShowAsync(
+                    this,
+                    "有未保存的更改",
+                    "是否保存后关闭？\n\n不保存的话，这次改的设置都会丢掉。",
+                    new[]
+                    {
+                        new Controls.InWindowDialog.DialogButton("留在设置页", "cancel", isCancel: true),
+                        new Controls.InWindowDialog.DialogButton("放弃更改", "discard"),
+                        new Controls.InWindowDialog.DialogButton("保存并关闭", "save", primary: true),
+                    }).ConfigureAwait(true);
 
-                if (answer == MessageBoxResult.Cancel)
+                if (choice == null || choice == "cancel")
                 {
                     return;
                 }
 
-                if (answer == MessageBoxResult.Yes)
+                if (choice == "save")
                 {
                     SaveSettings();
                 }
@@ -530,13 +547,53 @@ namespace LangCode.Ui.ToolWindows
             }
 
             var index = SetCtxWindow.SelectedIndex;
-            if (index < 0 || index >= ContextOptions.Count)
+            if (index < 0 || index >= _ctxOptions.Count)
             {
                 return;
             }
 
-            Settings.ContextWindow = ContextOptions[index];
+            Settings.ContextWindow = _ctxOptions[index];
             RaiseChanged();
+        }
+
+        /// <summary>
+        /// 重排「上下文窗口」下拉并按给定 token 数选中：固定档位 + 该值本身。
+        /// 模型容量（例：Baseten 163840、Claude 200000）不在固定档位里时不补一条的话，
+        /// 下拉只能选中「最接近的另一个数字」—— 界面显示的和实际生效的就对不上了
+        /// </summary>
+        private void BindContextOptions(int tokens)
+        {
+            if (SetCtxWindow == null)
+            {
+                return;
+            }
+
+            _ctxOptions.Clear();
+            _ctxOptions.AddRange(ContextOptions);
+
+            if (tokens > 0 && !_ctxOptions.Contains(tokens))
+            {
+                // 固定档位与模型容量可能"读起来"是同一个数（204800 与 200000 都读作 200K、
+                // 1048576 与 1000000 都读作 1M）。这时用模型自己的真实容量顶掉固定档位：
+                // 下拉里只留一条同名项，选中后生效的是厂商给的真值
+                var label = ModelCatalog.FormatTokens(tokens);
+                var clash = _ctxOptions.FindIndex(v =>
+                    string.Equals(ModelCatalog.FormatTokens(v), label, StringComparison.Ordinal));
+
+                if (clash >= 0)
+                {
+                    _ctxOptions[clash] = tokens;
+                }
+                else
+                {
+                    _ctxOptions.Add(tokens);
+                }
+
+                _ctxOptions.Sort();
+            }
+
+            SetCtxWindow.ItemsSource = _ctxOptions.Select(ModelCatalog.FormatTokens).ToList();
+            SelectContextWindow(tokens);
         }
 
         /// <summary>
@@ -547,9 +604,9 @@ namespace LangCode.Ui.ToolWindows
             var best = 0;
             var bestDelta = int.MaxValue;
 
-            for (var i = 0; i < ContextOptions.Count; i++)
+            for (var i = 0; i < _ctxOptions.Count; i++)
             {
-                var delta = Math.Abs(ContextOptions[i] - tokens);
+                var delta = Math.Abs(_ctxOptions[i] - tokens);
                 if (delta < bestDelta)
                 {
                     bestDelta = delta;

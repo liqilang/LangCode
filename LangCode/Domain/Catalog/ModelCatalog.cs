@@ -505,13 +505,14 @@ namespace LangCode.Domain.Catalog
                     file.Groups.Add(group);
                 }
 
-                group.Models = ids.Select(id => new ModelEntryOverride
-                {
-                    Id = id,
-                    DisplayName = id,
-                    ColorHex = "#4EC9B0",
-                    SupportsTools = true,
-                }).ToList();
+                // 端点 /models 只回 id：对内置目录里**已经认识**的模型，把它的容量 / 价格 / 能力一起带上。
+                // 否则「发现一次」就把内置目录里这些模型的上下文窗口与最大输出抹成 0 ——
+                // 设置页再选到它们时对不出限额（下拉停在别的模型留下的数字上）
+                var builtIn = BuildBuiltIn();
+
+                group.Models = ids
+                    .Select(id => DiscoveredEntry(id, key, builtIn))
+                    .ToList();
 
                 WriteDiscovered(file);
                 Reload();
@@ -522,6 +523,40 @@ namespace LangCode.Domain.Catalog
                 LastOverrideError = ex.GetType().Name + ": " + ex.Message;
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 由「端点发现的模型 id」生成一条目录条目：内置目录认识的就照抄它的信息
+        /// （显示名 / 容量 / 价格 / 能力），不认识的只留 id，等用户在设置页补
+        /// </summary>
+        private static ModelEntryOverride DiscoveredEntry(string id, string provider, IList<ModelGroup> builtIn)
+        {
+            // 优先取**同厂商**的那条：同一个 id 在不同厂商下的价格 / 容量可能不同
+            ModelInfo info = null;
+            for (var i = 0; i < builtIn.Count && info == null; i++)
+            {
+                if (string.Equals(builtIn[i].Provider, provider, StringComparison.OrdinalIgnoreCase))
+                {
+                    info = FindIn([builtIn[i]], id);
+                }
+            }
+
+            info ??= FindIn(builtIn, id);
+
+            return new ModelEntryOverride
+            {
+                Id = id,
+                DisplayName = string.IsNullOrWhiteSpace(info?.DisplayName) ? id : info.DisplayName,
+                ColorHex = string.IsNullOrWhiteSpace(info?.ColorHex) ? "#4EC9B0" : info.ColorHex,
+                ContextLabel = info?.ContextLabel ?? string.Empty,
+                ContextTokens = info?.ContextTokens ?? 0,
+                MaxOutputTokens = info?.MaxOutputTokens ?? 0,
+                SupportsImages = info?.SupportsImages ?? false,
+                SupportsReasoning = info?.SupportsReasoning ?? false,
+                SupportsTools = info?.SupportsTools ?? true,
+                InputPrice = info?.InputPricePerMillion ?? 0,
+                OutputPrice = info?.OutputPricePerMillion ?? 0,
+            };
         }
 
         /// <summary>
@@ -741,6 +776,17 @@ namespace LangCode.Domain.Catalog
                 entry.OutputPrice);
         }
 
+        /// <summary>
+        /// 容量的显示写法。模型容量本来就分两种叫法，这里按"哪种读起来是整数就用哪种"来输出：
+        ///
+        ///   1. 十进制刚好整齐的（400000 = 400K、1050000 = 1.05M、1000000 = 1M）→ 按 1000 进制；
+        ///   2. 否则按二进制 1024 进制 —— 大多数厂商的容量是这种：
+        ///      131072 = <b>128K</b>（不是 131.1k）、163840 = 160K、204800 = 200K、1048576 = 1M；
+        ///   3. 两种都不整齐时，取 1024 进制下的近似值（例：1047576 → 1M）。
+        ///
+        /// 以前一律按 1000 除，于是 131072 显示成「131.1k」、两组 1M 档位（1048576 / 1050000）
+        /// 还会同时显示成「1.05M」—— 下拉里根本分不清谁是谁
+        /// </summary>
         internal static string FormatTokens(int tokens)
         {
             if (tokens <= 0)
@@ -748,12 +794,48 @@ namespace LangCode.Domain.Catalog
                 return string.Empty;
             }
 
+            // 1) 十进制整齐的：按 1000 进制（小数点后只允许 1 位，163.84 这种不算整齐）
             if (tokens >= 1000000)
             {
-                return (tokens / 1000000.0).ToString("0.#") + "M";
+                var millions = tokens / 1000000.0;
+                if (IsWhole(millions, 2))
+                {
+                    return millions.ToString("0.##") + "M";
+                }
+            }
+            else
+            {
+                var thousands = tokens / 1000.0;
+                if (IsWhole(thousands, 1))
+                {
+                    return thousands.ToString("0.#") + "K";
+                }
             }
 
-            return (tokens / 1000.0).ToString("0.#") + "k";
+            // 2) 二进制整齐的：按 1024 进制（K 档必须小于 1024，否则交给下面的 M 档）
+            if (tokens % 1048576 == 0)
+            {
+                return (tokens / 1048576) + "M";
+            }
+
+            if (tokens % 1024 == 0 && tokens / 1024 < 1024)
+            {
+                return (tokens / 1024) + "K";
+            }
+
+            // 3) 兜底：1024 进制下的近似值，小数点后保留两位
+            return tokens >= 1000000
+                ? (tokens / 1048576.0).ToString("0.##") + "M"
+                : (tokens / 1024.0).ToString("0.#") + "K";
+        }
+
+        /// <summary>
+        /// 是否是"整齐"的数字（小数位数不超过 <paramref name="decimals"/>，且没有多余零头）
+        /// </summary>
+        private static bool IsWhole(double value, int decimals)
+        {
+            var rounded = Math.Round(value, decimals, MidpointRounding.AwayFromZero);
+            return Math.Abs(value - rounded) < 0.0000001;
         }
 
         // ==================== 内置目录 ====================

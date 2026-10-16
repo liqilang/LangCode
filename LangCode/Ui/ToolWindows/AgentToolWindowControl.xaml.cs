@@ -392,8 +392,14 @@ namespace LangCode.Ui.ToolWindows
 
                 await Dispatcher.InvokeAsync(() =>
                 {
-                    // 目录就绪后再按当前模型对齐「上下文窗口 / 最大输出」（此前只是兜底值）
-                    _settings.AlignLimitsToModel(_settings.Model);
+                    // 目录就绪后再按当前模型对齐「上下文窗口 / 最大输出」（此前只是兜底值）——
+                    // 只处理「还是出厂默认」的限额：用户调过的 / 配置档案里恢复出来的值一律不动，
+                    // 否则每次开窗口都会把 A 配置的窗口改写成"模型能力"
+                    if (_settings.LimitsAreDefault())
+                    {
+                        _settings.AlignLimitsToModel(_settings.Model);
+                    }
+
                     _session.ContextWindow = _settings.ContextWindow;
                     _session.CurrentModel = _settings.Model;
 
@@ -560,6 +566,96 @@ namespace LangCode.Ui.ToolWindows
                 _mentions = null;
                 _workspaceRoot = string.Empty;
             }
+        }
+
+        // ============================================================
+        // 检查点（时间旅行）：每轮开始打一个点，消息上的按钮据此还原
+        // ============================================================
+
+        /// <summary>
+        /// 检查点仓库（懒建）：换工作区（切项目）时按新根目录重建
+        /// </summary>
+        private CheckpointStore _checkpoints;
+
+        /// <summary>
+        /// 上面那个仓库对应的根目录
+        /// </summary>
+        private string _checkpointsRoot = string.Empty;
+
+        /// <summary>
+        /// 取当前工作区的检查点仓库：关掉「检查点」或没有工作区时返回 null（调用方优雅跳过）
+        /// </summary>
+        private CheckpointStore EnsureCheckpoints()
+        {
+            if (_settings == null || !_settings.Checkpoints || string.IsNullOrWhiteSpace(_workspaceRoot))
+            {
+                return null;
+            }
+
+            if (_checkpoints == null || !string.Equals(_checkpointsRoot, _workspaceRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                _checkpoints = new CheckpointStore(_workspaceRoot);
+                _checkpointsRoot = _workspaceRoot;
+            }
+
+            return _checkpoints;
+        }
+
+        /// <summary>
+        /// 为「这一轮对话」打一个检查点，并挂在触发它的那条用户消息上。
+        /// 必须在 Agent 动手改文件<b>之前</b>调用 —— 这样消息上的还原按钮才是
+        /// 「回到这条消息发出之前」的代码状态。git 操作放后台线程：
+        /// 大仓库里 git add -A 要几百毫秒，别卡住界面
+        /// </summary>
+        private async Task CreateTurnCheckpointAsync(ChatMessage userMessage)
+        {
+            if (userMessage == null)
+            {
+                return;
+            }
+
+            var store = EnsureCheckpoints();
+            if (store == null || !store.IsAvailable)
+            {
+                return;
+            }
+
+            // 标签用 ASCII：它会经命令行传给 git，中文在非 UTF-8 代码页下会被写坏
+            var label = "checkpoint " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+            try
+            {
+                var info = await Task.Run(() => store.Create(label)).ConfigureAwait(true);
+                if (info != null)
+                {
+                    userMessage.CheckpointId = info.Id;
+                }
+            }
+            catch (Exception)
+            {
+                // 打点失败不影响这一轮对话：没有检查点就没有还原按钮
+            }
+        }
+
+        /// <summary>
+        /// 取一段文本的首行（检查点提示文案用）：太长就截断
+        /// </summary>
+        private static string FirstLineOf(string text, int max = 28)
+        {
+            var line = text ?? string.Empty;
+            var cut = line.IndexOfAny(new[] { '\r', '\n' });
+            if (cut >= 0)
+            {
+                line = line.Substring(0, cut);
+            }
+
+            line = line.Trim();
+            if (line.Length == 0)
+            {
+                return "（空消息）";
+            }
+
+            return line.Length > max ? line.Substring(0, max) + "…" : line;
         }
 
         /// <summary>

@@ -49,6 +49,18 @@ namespace LangCode.Domain.Settings
         public int ThinkingBudgetTokens { get; set; }
 
         /// <summary>
+        /// 这套厂商配置的上下文窗口（token；0 = 还没存过，套用时按模型能力带出）
+        /// </summary>
+        [DataMember(Name = "contextWindow", Order = 9)]
+        public int ContextWindow { get; set; }
+
+        /// <summary>
+        /// 这套厂商配置的最大输出 token（0 = 还没存过）
+        /// </summary>
+        [DataMember(Name = "maxOutputTokens", Order = 10)]
+        public int MaxOutputTokens { get; set; }
+
+        /// <summary>
         /// 提供商专属的额外选项（区域 / Azure 版本 / 端点选择等），键值对形式
         /// </summary>
         [DataMember(Name = "options", Order = 8)]
@@ -65,6 +77,8 @@ namespace LangCode.Domain.Settings
                 ReasoningEffort = ReasoningEffort,
                 Verbosity = Verbosity,
                 ThinkingBudgetTokens = ThinkingBudgetTokens,
+                ContextWindow = ContextWindow,
+                MaxOutputTokens = MaxOutputTokens,
                 Options = new Dictionary<string, string>(Options ?? []),
             };
         }
@@ -95,6 +109,18 @@ namespace LangCode.Domain.Settings
         public string Model { get; set; } = string.Empty;
 
         /// <summary>
+        /// 这套配置的上下文窗口（token；0 = 还没存过，套用时按模型能力带出）
+        /// </summary>
+        [DataMember(Name = "contextWindow", Order = 6)]
+        public int ContextWindow { get; set; }
+
+        /// <summary>
+        /// 这套配置的最大输出 token（0 = 还没存过）
+        /// </summary>
+        [DataMember(Name = "maxOutputTokens", Order = 7)]
+        public int MaxOutputTokens { get; set; }
+
+        /// <summary>
         /// 列表里的一行摘要（「OpenAI · gpt-4o」）
         /// </summary>
         public string Summary
@@ -115,6 +141,8 @@ namespace LangCode.Domain.Settings
                 BaseUrl = BaseUrl,
                 ApiKey = ApiKey,
                 Model = Model,
+                ContextWindow = ContextWindow,
+                MaxOutputTokens = MaxOutputTokens,
             };
         }
     }
@@ -565,7 +593,38 @@ namespace LangCode.Domain.Settings
             profile.ReasoningEffort = ReasoningEffort ?? string.Empty;
             profile.Verbosity = Verbosity ?? string.Empty;
             profile.ThinkingBudgetTokens = ThinkingBudgetTokens;
+
+            // 限额也是这套配置的一部分：切走时连同「上下文窗口 / 最大输出」一起存进厂商槽，
+            // 切回来才能原样恢复（否则 A 的 1M 会串到 B，B 改 128K 又会串回 A）
+            profile.ContextWindow = ContextWindow;
+            profile.MaxOutputTokens = MaxOutputTokens;
+
             profile.Options = new Dictionary<string, string>(ProviderOptions ?? []);
+
+            // 正在使用命名档案时同步回档：在档案上改了限额 / 换了模型，就是改了这套配置，
+            // 免得档案里留着旧值、下次切回来又被"老值"覆盖
+            if (!string.IsNullOrWhiteSpace(ActiveProfileName))
+            {
+                var named = FindNamedProfile(ActiveProfileName);
+                if (named != null)
+                {
+                    named.Provider = Provider ?? string.Empty;
+                    named.BaseUrl = BaseUrl ?? string.Empty;
+                    named.ApiKey = ApiKey ?? string.Empty;
+                    named.Model = Model ?? string.Empty;
+                    named.ContextWindow = ContextWindow;
+                    named.MaxOutputTokens = MaxOutputTokens;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 「上下文窗口 / 最大输出」是否还是出厂默认值（判断用户到底有没有自己调过）
+        /// </summary>
+        public bool LimitsAreDefault()
+        {
+            var defaults = new AppSettings();
+            return ContextWindow == defaults.ContextWindow && MaxOutputTokens == defaults.MaxOutputTokens;
         }
 
         /// <summary>
@@ -591,6 +650,10 @@ namespace LangCode.Domain.Settings
             {
                 MaxOutputTokens = maxOutput;
             }
+
+            // 对齐结果也要落回档案槽：这样「这套配置 + 这个模型」的限额是配套的，
+            // 下次切回它时恢复出来的就是对的
+            StoreActiveProfile();
         }
 
         /// <summary>
@@ -672,6 +735,10 @@ namespace LangCode.Domain.Settings
             profile.ApiKey = ApiKey ?? string.Empty;
             profile.Model = Model ?? string.Empty;
 
+            // 限额跟着模型走，一起存进档案
+            profile.ContextWindow = ContextWindow;
+            profile.MaxOutputTokens = MaxOutputTokens;
+
             ActiveProfileName = profile.Name;
             return profile;
         }
@@ -696,6 +763,21 @@ namespace LangCode.Domain.Settings
             ApiKey = profile.ApiKey ?? string.Empty;
             Model = profile.Model ?? string.Empty;
             ActiveProfileName = profile.Name;
+
+            if (profile.ContextWindow > 0)
+            {
+                // 档案里存过限额：原样恢复（用户自己调过的 1M 不该被"模型能力"改掉）
+                ContextWindow = profile.ContextWindow;
+                if (profile.MaxOutputTokens > 0)
+                {
+                    MaxOutputTokens = profile.MaxOutputTokens;
+                }
+            }
+            else
+            {
+                // 老档案（还没有限额字段）/ 新建档案：按该模型的真实能力带出
+                AlignLimitsToModel(Model);
+            }
 
             // 同步写回「按厂商」的槽位：两条路径（按厂商 / 按名字）看到的是同一套配置
             StoreActiveProfile();
@@ -728,11 +810,15 @@ namespace LangCode.Domain.Settings
         /// </summary>
         /// <param name="provider">目标厂商</param>
         /// <param name="model">可选的模型 id（为空则用该厂商档案里的默认模型）</param>
-        public void SwitchProvider(string provider, string model = null)
+        /// <returns>
+        /// 该厂商档案里存过自己的「上下文窗口 / 最大输出」时为 true
+        /// （调用方据此决定还要不要按新模型的能力再对齐一次）
+        /// </returns>
+        public bool SwitchProvider(string provider, string model = null)
         {
             if (string.IsNullOrWhiteSpace(provider))
             {
-                return;
+                return false;
             }
 
             StoreActiveProfile();
@@ -757,6 +843,22 @@ namespace LangCode.Domain.Settings
             }
 
             profile.DefaultModel = Model ?? string.Empty;
+
+            // 限额随厂商档案一起换：这套厂商配置自己存过就用它的（各家互不串），
+            // 没存过则保持原值，由调用方按新模型能力对齐
+            if (profile.ContextWindow > 0)
+            {
+                ContextWindow = profile.ContextWindow;
+
+                if (profile.MaxOutputTokens > 0)
+                {
+                    MaxOutputTokens = profile.MaxOutputTokens;
+                }
+
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>

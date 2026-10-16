@@ -108,6 +108,15 @@ namespace LangCode.Ui.ToolWindows
             UpdateSendState();
             ScrollToEnd();
 
+            // 「检查点」：这一轮还没动手改文件，先打一个点挂在这条用户消息上 ——
+            // 之后想回到「这条消息发出之前」的代码状态，点消息上的还原按钮即可。
+            // 放在这里是为了让界面先进入"生成中"（大仓库里 git add -A 要一点时间，
+            // 期间用户能看到忙碌态，而不是以为没反应）；此后到 Agent 动手前不会再写文件
+            if (userMessage != null)
+            {
+                await CreateTurnCheckpointAsync(userMessage).ConfigureAwait(true);
+            }
+
             _cts = new CancellationTokenSource();
             var backend = ChatBackendFactory.Create(_settings);
 
@@ -424,20 +433,22 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
-            // 本步新起一块时，原文累加器也一起归零 —— 否则上一步的原文会带进来，
-            // 让这一步的正文里残留上一步的动作代码
-            if (_turnText == null)
-            {
-                _turnText = ChatSession.BeginText(target);
-                _turnRawText = null;
-            }
-
             _turnRawText ??= new StringBuilder();
             _turnRawText.Append(text);
 
             // 原文攒在 _turnRawText 上，展示用的正文每次都由原文重新去除动作块 ——
             // 不能直接把增量追加到已过滤的正文上，否则动作块消失后紧跟着的增量会粘错位置
-            _turnText.Text = ToolProtocol.StripActionsForDisplay(_turnRawText.ToString());
+            var visible = ToolProtocol.StripActionsForDisplay(_turnRawText.ToString());
+
+            // 这一步还一个字都没露出来（整段都还是工具动作）：先不建正文块 ——
+            // 否则任务收尾处会留下若干**空白正文块**（看着就是平白多出几段空隙）
+            if (_turnText == null && string.IsNullOrEmpty(visible))
+            {
+                return;
+            }
+
+            _turnText ??= ChatSession.BeginText(target);
+            _turnText.Text = visible;
         }
 
         /// <summary>
@@ -458,16 +469,24 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
-            // 本轮一次正文都没流出来（例如模型只回了动作块）：补一个正文块，让文本有地方落
+            var text = raw == null ? null : (hasActions ? ToolProtocol.StripActions(raw) : raw);
+
+            // 本轮一次正文都没流出来（例如模型只回了动作块）：只有真的还有正文才补块，
+            // 空块在界面上就是一段平白多出来的空隙 —— 任务收尾时能连出好几段
             if (_turnText == null)
             {
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return;
+                }
+
                 _turnText = new ChatBlock { Kind = ChatBlockKind.Text };
                 assistant.Blocks.Add(_turnText);
             }
 
             if (raw != null)
             {
-                _turnText.Text = hasActions ? ToolProtocol.StripActions(raw) : raw;
+                _turnText.Text = text ?? string.Empty;
             }
 
             UpdateTokens();

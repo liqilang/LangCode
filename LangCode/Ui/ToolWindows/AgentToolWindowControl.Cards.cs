@@ -200,6 +200,20 @@ namespace LangCode.Ui.ToolWindows
         }
 
         /// <summary>
+        /// 点代码卡（命令输出 / 读文件 / 列目录…）的头部任意位置：展开 / 收起这张卡片。
+        /// 不用非得去点右边那个小箭头 —— 箭头设成 <c>IsHitTestVisible=False</c>，
+        /// 命中统一交给这一行，一次点击只会被处理一遍
+        /// </summary>
+        private void CodeCardHeader_Click(object sender, MouseButtonEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is ChatBlock block)
+            {
+                block.IsBodyVisible = !block.IsBodyVisible;
+                e.Handled = true;
+            }
+        }
+
+        /// <summary>
         /// 点顶部状态条的概览行：展开 / 收起用量明细
         /// </summary>
         private void StatusHeader_Click(object sender, RoutedEventArgs e)

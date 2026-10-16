@@ -381,27 +381,34 @@ namespace LangCode.Ui.ToolWindows
 
         private void RenderCapabilities()
         {
-            if (ProviderFieldsPanel == null || Settings == null)
+            if (CapabilitiesFieldsPanel == null || Settings == null)
             {
                 return;
             }
+
+            // 单独一块面板（排在「模型参数」之后）：切提供商时要么整块重建，要么整块收起
+            var panel = CapabilitiesFieldsPanel;
+            panel.Children.Clear();
 
             if (!string.Equals(
                     ProviderCatalog.Canonicalize(Settings.Provider),
                     ProviderCatalog.OpenAiCompatible,
                     StringComparison.OrdinalIgnoreCase))
             {
+                panel.Visibility = Visibility.Collapsed;
                 return;
             }
 
-            ProviderFieldsPanel.Children.Add(FieldText("模型能力"));
-            ProviderFieldsPanel.Children.Add(HintText("配置该自定义模型的能力与价格，会影响工具调用与费用统计"));
+            panel.Visibility = Visibility.Visible;
 
-            ProviderFieldsPanel.Children.Add(OptionNumber("caps.maxTokens", "最大输出 token"));
-            ProviderFieldsPanel.Children.Add(OptionNumber("caps.contextWindow", "上下文窗口 token"));
+            panel.Children.Add(FieldText("模型能力"));
+            panel.Children.Add(HintText("配置该自定义模型的能力与价格，会影响工具调用与费用统计"));
+
+            panel.Children.Add(OptionNumber("caps.maxTokens", "最大输出 token"));
+            panel.Children.Add(OptionNumber("caps.contextWindow", "上下文窗口 token"));
 
             var images = NewOptionCheck("caps.supportsImages", "图像支持");
-            ProviderFieldsPanel.Children.Add(CheckRow(images, "该模型是否能处理与理解图片"));
+            panel.Children.Add(CheckRow(images, "该模型是否能处理与理解图片"));
 
             var cachePanel = new StackPanel { Margin = new Thickness(14, 0, 0, 0) };
             cachePanel.Children.Add(OptionNumber("caps.cacheReadsPrice", "缓存读取价格（$ / 百万 token）"));
@@ -411,15 +418,15 @@ namespace LangCode.Ui.ToolWindows
             cachePanel.Visibility = cacheBox.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             cacheBox.Checked += (_, __) => { if (!_binding) { cachePanel.Visibility = Visibility.Visible; } };
             cacheBox.Unchecked += (_, __) => { if (!_binding) { cachePanel.Visibility = Visibility.Collapsed; } };
-            ProviderFieldsPanel.Children.Add(CheckRow(cacheBox, "该模型是否支持提示缓存（可降低费用）"));
-            ProviderFieldsPanel.Children.Add(cachePanel);
+            panel.Children.Add(CheckRow(cacheBox, "该模型是否支持提示缓存（可降低费用）"));
+            panel.Children.Add(cachePanel);
 
-            ProviderFieldsPanel.Children.Add(OptionNumber("caps.inputPrice", "输入价格（$ / 百万 token）"));
-            ProviderFieldsPanel.Children.Add(OptionNumber("caps.outputPrice", "输出价格（$ / 百万 token）"));
+            panel.Children.Add(OptionNumber("caps.inputPrice", "输入价格（$ / 百万 token）"));
+            panel.Children.Add(OptionNumber("caps.outputPrice", "输出价格（$ / 百万 token）"));
 
             // 附加请求参数：把 OpenAI 协议之外的厂商私有开关直接拼进请求体。
             // 典型场景：vLLM 上跑 Qwen3，需要 chat_template_kwargs.enable_thinking 才会输出思考过程
-            ProviderFieldsPanel.Children.Add(OptionText(
+            panel.Children.Add(OptionText(
                 "caps.extraBody",
                 "附加请求参数 (JSON)",
                 "原样拼进请求体根对象，用于补上厂商私有开关。例：{\"chat_template_kwargs\":{\"enable_thinking\":true}}"));
@@ -431,8 +438,8 @@ namespace LangCode.Ui.ToolWindows
             reasoningPanel.Visibility = reasoningBox.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             reasoningBox.Checked += (_, __) => { if (!_binding) { reasoningPanel.Visibility = Visibility.Visible; } };
             reasoningBox.Unchecked += (_, __) => { if (!_binding) { reasoningPanel.Visibility = Visibility.Collapsed; } };
-            ProviderFieldsPanel.Children.Add(CheckRow(reasoningBox, "开启后可为该模型指定推理强度"));
-            ProviderFieldsPanel.Children.Add(reasoningPanel);
+            panel.Children.Add(CheckRow(reasoningBox, "开启后可为该模型指定推理强度"));
+            panel.Children.Add(reasoningPanel);
 
             var reset = new Button
             {
@@ -461,7 +468,7 @@ namespace LangCode.Ui.ToolWindows
                 RenderProviderFields();
                 RaiseChanged();
             };
-            ProviderFieldsPanel.Children.Add(reset);
+            panel.Children.Add(reset);
         }
 
         /// <summary>
