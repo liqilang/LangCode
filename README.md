@@ -5,7 +5,7 @@
 > 一句话：把「能真正干活」的 AI Agent 装进 Visual Studio 的工具窗口。
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
-![Visual Studio](<https://img.shields.io/badge/Visual%20Studio-2022%20(17.0%2B)-5C2D91.svg>)
+![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022%20(17.0%2B)-5C2D91.svg)
 ![.NET Framework](https://img.shields.io/badge/.NET%20Framework-4.7.2-512BD4.svg)
 
 ![LangCode 使用演示](Images/示例.gif)
