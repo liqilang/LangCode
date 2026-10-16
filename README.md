@@ -1,14 +1,22 @@
-# LangCode
+<div align="center">
 
-**Visual Studio 里的 AI 编程助手。** 它会聊天，但不止会聊天 —— 它能直接读懂你的项目、动手改代码、跑命令和测试，而且每一次「动你的文件」之前都会先给你看清楚改了什么，你点头它才落地。
+<img src="Images/robot.svg" width="104" alt="LangCode 机器人" />
 
-> 一句话：把「能真正干活」的 AI Agent 装进 Visual Studio 的工具窗口。
+<h1>LangCode</h1>
 
-![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
-![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022%20(17.0%2B)-5C2D91.svg)
-![.NET Framework](https://img.shields.io/badge/.NET%20Framework-4.7.2-512BD4.svg)
+<p><strong>Visual Studio 里的 AI 编程助手。</strong> 它会聊天，但不止会聊天 —— 它能直接读懂你的项目、动手改代码、跑命令和测试，而且每一次「动你的文件」之前都会先给你看清楚改了什么，你点头它才落地。</p>
 
-![LangCode 使用演示](Images/示例.gif)
+<p>一句话：把「能真正干活」的 AI Agent 装进 Visual Studio 的工具窗口。</p>
+
+<p>
+  <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" />
+  <img src="https://img.shields.io/badge/Visual%20Studio-2022%20(17.0%2B)-5C2D91.svg" alt="Visual Studio" />
+  <img src="https://img.shields.io/badge/.NET%20Framework-4.7.2-512BD4.svg" alt=".NET Framework" />
+</p>
+
+<img src="Images/示例.gif" alt="LangCode 使用演示" width="720" />
+
+</div>
 
 ---
 

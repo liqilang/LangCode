@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="LangCode 机器人">
+  <style>
+    .line { fill: none; stroke: #111111; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+    .dot  { fill: #111111; stroke: none; }
+    @media (prefers-color-scheme: dark) {
+      .line { stroke: #F2F2F2; }
+      .dot  { fill: #F2F2F2; }
+    }
+  </style>
+
+  <!-- 天线 -->
+  <line class="line" x1="64" y1="30" x2="64" y2="18" />
+  <circle class="dot" cx="64" cy="13" r="4.5" />
+
+  <!-- 两侧耳朵 -->
+  <line class="line" x1="24" y1="50" x2="24" y2="74" />
+  <line class="line" x1="104" y1="50" x2="104" y2="74" />
+
+  <!-- 头部 -->
+  <rect class="line" x="32" y="30" width="64" height="62" rx="16" />
+
+  <!-- 眼睛 -->
+  <circle class="dot" cx="51" cy="56" r="6" />
+  <circle class="dot" cx="77" cy="56" r="6" />
+
+  <!-- 嘴 -->
+  <path class="line" d="M52 72 q12 9 24 0" />
+</svg>
