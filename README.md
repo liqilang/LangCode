@@ -46,6 +46,8 @@
 
 ## 界面截图
 
+### 核心界面
+
 <table align="center">
   <tr>
     <td align="center"><img src="Images/主页.png" alt="LangCode 主界面" width="420" /><br /><sub>主界面</sub></td>
@@ -54,6 +56,20 @@
   <tr>
     <td align="center"><img src="Images/设置页.png" alt="LangCode 设置页" width="420" /><br /><sub>设置页</sub></td>
     <td align="center"><img src="Images/历史页.png" alt="LangCode 历史页" width="420" /><br /><sub>历史页</sub></td>
+  </tr>
+</table>
+
+### AI 编排与审批
+
+<!-- 截图命名约定：Images/features/提问.png、任务清单.png、子任务.png、审批.png -->
+<table align="center">
+  <tr>
+    <td align="center"><img src="Images/提问.png" alt="主动提问" width="420" /><br /><sub>主动提问</sub></td>
+    <td align="center"><img src="Images/任务清单.png" alt="任务清单" width="420" /><br /><sub>任务清单</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="Images/子任务.png" alt="子任务" width="420" /><br /><sub>子任务</sub></td>
+    <td align="center"><img src="Images/审批.png" alt="审批与差异卡" width="420" /><br /><sub>审批与差异卡</sub></td>
   </tr>
 </table>
 
@@ -310,7 +326,6 @@ LangCode/
 | [AI 与自动化能力总览](docs/ai-agent.md) | Agent 循环、子任务、任务清单、主动提问、计划模式、自动验证 / 修复、上下文与成本、安全与回退 |
 | [工具参考](docs/tools.md)               | 全部 24 个工具的参数、审批类别、破坏性标记、调用协议与示例                                  |
 | [文档索引](docs/README.md)              | 文档导航与名词解释                                                                          |
-
 
 ## 许可证
 
