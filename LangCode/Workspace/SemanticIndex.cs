@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace LangCode.Workspace
 {
@@ -93,22 +95,49 @@ namespace LangCode.Workspace
         };
 
         private readonly string _root;
-        private readonly object _gate = new object();
 
-        private List<CodeChunk> _chunks;
-        private Dictionary<string, List<int>> _postings;   // 词 → 片段下标
-        private Dictionary<string, int> _documentFrequency; // 词 → 出现该词的片段数
-        private Dictionary<string, int> _pathFrequency;     // 词 → 出现该词的路径数（路径加权）
-        private List<SymbolNode> _symbols;
-        private Dictionary<string, List<SymbolNode>> _symbolsByName;
-        private DateTime _builtAtUtc = DateTime.MinValue;
-        private int _chunkCount;
-        private double _avgChunkLength = 1;
+        /// <summary>
+        /// 只保护「构建任务 / 快照发布」这件事；检索本身不加锁（读的是不可变快照）
+        /// </summary>
+        private readonly object _buildGate = new object();
+
+        /// <summary>
+        /// 建好的一份索引快照：发布后只读，检索线程可以无锁并发使用
+        /// </summary>
+        private sealed class IndexSnapshot
+        {
+            public List<CodeChunk> Chunks = new List<CodeChunk>();
+            public Dictionary<string, List<int>> Postings = new Dictionary<string, List<int>>(StringComparer.Ordinal);      // 词 → 片段下标
+            public Dictionary<string, int> DocumentFrequency = new Dictionary<string, int>(StringComparer.Ordinal);        // 词 → 出现该词的片段数
+            public Dictionary<string, int> PathFrequency = new Dictionary<string, int>(StringComparer.Ordinal);            // 词 → 出现该词的路径数（路径加权）
+            public List<SymbolNode> Symbols = new List<SymbolNode>();
+            public Dictionary<string, List<SymbolNode>> SymbolsByName = new Dictionary<string, List<SymbolNode>>(StringComparer.Ordinal);
+            public int ChunkCount = 1;
+            public double AvgChunkLength = 1;
+            public DateTime BuiltAtUtc = DateTime.MinValue;
+        }
+
+        private volatile IndexSnapshot _snapshot;
+
+        /// <summary>
+        /// 当前的建索引任务（避免并发查询各建一次）
+        /// </summary>
+        private Task _buildTask;
+
+        /// <summary>
+        /// 版本号：<see cref="Invalidate"/> 时自增；构建期间被失效的结果会被丢弃
+        /// </summary>
+        private int _generation;
 
         /// <summary>
         /// 索引有效期：太长会让刚改的代码检索不到；太短则每次检索都重扫
         /// </summary>
         private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(5);
+
+        /// <summary>
+        /// 改动后延迟多久在后台重建：连续编辑期间只重建最后一次
+        /// </summary>
+        private static readonly TimeSpan RebuildDelay = TimeSpan.FromSeconds(3);
 
         public SemanticIndex(string root)
         {
@@ -133,20 +162,83 @@ namespace LangCode.Workspace
         public bool IsReady => _root.Length > 0 && Directory.Exists(_root);
 
         /// <summary>
-        /// 丢弃缓存（下一次查询时重建）
+        /// 是否正在后台建索引（界面 / 自检可据此显示进度）
         /// </summary>
-        public void Invalidate()
+        public bool IsBuilding
         {
-            lock (_gate)
+            get
             {
-                _chunks = null;
-                _postings = null;
-                _documentFrequency = null;
-                _pathFrequency = null;
-                _symbols = null;
-                _symbolsByName = null;
-                _builtAtUtc = DateTime.MinValue;
+                lock (_buildGate)
+                {
+                    return _buildTask != null && !_buildTask.IsCompleted;
+                }
             }
+        }
+
+        /// <summary>
+        /// 后台预热：立即返回，建好后供后续检索使用
+        /// </summary>
+        /// <remarks>
+        /// 打开工具窗口 / 切换解决方案时调用。首次 <c>semantic_search</c> 不必再等一次全仓库扫描，
+        /// 而扫描本身也不会占用 UI 线程。
+        /// </remarks>
+        public void StartBackgroundBuild()
+        {
+            if (!IsReady)
+            {
+                return;
+            }
+
+            Task.Run(() =>
+            {
+                try
+                {
+                    EnsureBuilt();
+                }
+                catch (Exception)
+                {
+                    // 建索引失败只影响检索质量：保持未就绪，下次查询会再试
+                }
+            });
+        }
+
+        /// <summary>
+        /// 丢弃缓存
+        /// </summary>
+        /// <param name="rebuildInBackground">
+        /// 是否在短暂防抖后自动后台重建。文件改动后应立即失效（避免读到旧代码），
+        /// 但没必要让下一次检索再同步扫一遍仓库，所以默认在后台补建。
+        /// </param>
+        public void Invalidate(bool rebuildInBackground = true)
+        {
+            Interlocked.Increment(ref _generation);
+            _snapshot = null;
+
+            if (!rebuildInBackground || !IsReady)
+            {
+                return;
+            }
+
+            // 防抖：连续编辑只重建最后一次（旧的调度发现版本号变了就自动退出）
+            var generation = Volatile.Read(ref _generation);
+            Task.Delay(RebuildDelay).ContinueWith(
+                _ =>
+                {
+                    if (Volatile.Read(ref _generation) != generation)
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        EnsureBuilt();
+                    }
+                    catch (Exception)
+                    {
+                        // 后台重建失败：保持未就绪，下次检索时再试
+                    }
+                },
+                TaskScheduler.Default);
         }
 
         /// <summary>
@@ -165,88 +257,90 @@ namespace LangCode.Workspace
                 return Fail("查询词为空：请给出要查找的功能 / 符号 / 概念关键词");
             }
 
-            lock (_gate)
+            // 先确保索引就绪（后台已在建则只等它，不重复扫描），之后全程读不可变快照
+            var snapshot = EnsureBuilt();
+            var chunks = snapshot.Chunks;
+            if (chunks.Count == 0)
             {
-                EnsureBuilt();
-                if (_chunks.Count == 0)
+                return Fail("索引为空：工作区里没有可索引的源码文件");
+            }
+
+            var top = limit <= 0 ? 8 : limit;
+            var scores = new Dictionary<int, double>();
+            var unique = terms.Distinct(StringComparer.Ordinal).ToList();
+
+            foreach (var term in unique)
+            {
+                if (!snapshot.Postings.TryGetValue(term, out var posting))
                 {
-                    return Fail("索引为空：工作区里没有可索引的源码文件");
+                    continue;
                 }
 
-                var top = limit <= 0 ? 8 : limit;
-                var scores = new Dictionary<int, double>();
-                var unique = terms.Distinct(StringComparer.Ordinal).ToList();
+                var df = Math.Max(1, snapshot.DocumentFrequency[term]);
+                var idf = Math.Log(1.0 + (snapshot.ChunkCount - df + 0.5) / (df + 0.5));
 
-                foreach (var term in unique)
+                foreach (var chunkIndex in posting)
                 {
-                    if (!_postings.TryGetValue(term, out var posting))
+                    var chunk = chunks[chunkIndex];
+                    var tf = CountTerm(chunk.Text, term);
+                    if (tf == 0)
                     {
                         continue;
                     }
 
-                    var df = Math.Max(1, _documentFrequency[term]);
-                    var idf = Math.Log(1.0 + (_chunkCount - df + 0.5) / (df + 0.5));
+                    var dl = Math.Max(1, chunk.Text.Length / 4.0);
+                    const double k1 = 1.4;
+                    const double b = 0.72;
+                    var denom = tf + k1 * (1 - b + b * dl / snapshot.AvgChunkLength);
+                    var score = idf * (tf * (k1 + 1)) / Math.Max(0.0001, denom);
 
-                    foreach (var chunkIndex in posting)
+                    // 路径命中加权：查 "AgentRunner" 时，文件名叫 AgentRunner.cs 的片段更相关
+                    if (chunk.Path.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
                     {
-                        var chunk = _chunks[chunkIndex];
-                        var tf = CountTerm(chunk.Text, term);
-                        if (tf == 0)
-                        {
-                            continue;
-                        }
-
-                        var dl = Math.Max(1, chunk.Text.Length / 4.0);
-                        const double k1 = 1.4;
-                        const double b = 0.72;
-                        var denom = tf + k1 * (1 - b + b * dl / _avgChunkLength);
-                        var score = idf * (tf * (k1 + 1)) / Math.Max(0.0001, denom);
-
-                        // 路径命中加权：查 "AgentRunner" 时，文件名叫 AgentRunner.cs 的片段更相关
-                        score *= 1.0 + 0.35 * PathBoost(chunk.Path, term);
-
-                        scores.TryGetValue(chunkIndex, out var existing);
-                        scores[chunkIndex] = existing + score;
-                    }
-                }
-
-                if (scores.Count == 0)
-                {
-                    return Ok("没有找到相关代码片段（可换个关键词，或先用 search_text 精确匹配）");
-                }
-
-                var ranked = scores
-                    .OrderByDescending(kv => kv.Value)
-                    .ThenBy(kv => _chunks[kv.Key].Path, StringComparer.OrdinalIgnoreCase)
-                    .Take(top)
-                    .ToList();
-
-                var builder = new StringBuilder();
-                builder.Append("语义检索结果（“").Append((query ?? string.Empty).Trim()).Append("”，共 ")
-                       .Append(ranked.Count).Append(" 段，按相关度排序）：\n\n");
-
-                var rank = 0;
-                foreach (var entry in ranked)
-                {
-                    var chunk = _chunks[entry.Key];
-                    builder.Append("── #").Append(++rank).Append(" · ").Append(chunk.Path);
-                    if (chunk.StartLine > 0)
-                    {
-                        builder.Append(':').Append(chunk.StartLine);
+                        score *= 1.35;
                     }
 
-                    if (chunk.Symbol.Length > 0)
-                    {
-                        builder.Append(" · ").Append(chunk.Kind).Append(' ').Append(chunk.Symbol);
-                    }
-
-                    builder.Append("（相关度 ").Append(entry.Value.ToString("0.00")).Append("）\n");
-                    builder.Append(TrimSnippet(chunk.Text)).Append("\n\n");
+                    scores.TryGetValue(chunkIndex, out var existing);
+                    scores[chunkIndex] = existing + score;
                 }
-
-                builder.Append("提示：需要完整内容时用 read_file 读取上面对应的文件与行号");
-                return Ok(builder.ToString());
             }
+
+            if (scores.Count == 0)
+            {
+                return Ok("没有找到相关代码片段（可换个关键词，或先用 search_text 精确匹配）");
+            }
+
+            var ranked = scores
+                .OrderByDescending(kv => kv.Value)
+                .ThenBy(kv => chunks[kv.Key].Path, StringComparer.OrdinalIgnoreCase)
+                .Take(top)
+                .ToList();
+
+            var builder = new StringBuilder();
+            builder.Append("语义检索结果（“").Append((query ?? string.Empty).Trim()).Append("”，共 ")
+                   .Append(ranked.Count).Append(" 段，按相关度排序）：\n\n");
+
+            var rank = 0;
+            foreach (var entry in ranked)
+            {
+                var chunk = chunks[entry.Key];
+                builder.Append("── #").Append(++rank).Append(" · ").Append(chunk.Path);
+                if (chunk.StartLine > 0)
+                {
+                    builder.Append(':').Append(chunk.StartLine);
+                }
+
+                if (chunk.Symbol.Length > 0)
+                {
+                    builder.Append(" · ").Append(chunk.Kind).Append(' ').Append(chunk.Symbol);
+                }
+
+                builder.Append("（相关度 ").Append(entry.Value.ToString("0.00")).Append("）\n");
+                builder.Append(TrimSnippet(chunk.Text)).Append("\n\n");
+            }
+
+            builder.Append("提示：需要完整内容时用 read_file 读取上面对应的文件与行号");
+            return Ok(builder.ToString());
         }
 
         /// <summary>
@@ -265,39 +359,36 @@ namespace LangCode.Workspace
                 return Fail("未检测到工作区");
             }
 
-            lock (_gate)
+            var snapshot = EnsureBuilt();
+
+            if (!snapshot.SymbolsByName.TryGetValue(name, out var nodes) || nodes.Count == 0)
             {
-                EnsureBuilt();
-
-                if (!_symbolsByName.TryGetValue(name, out var nodes) || nodes.Count == 0)
-                {
-                    return Ok("没有在索引里找到类型 " + name + "（可能未被识别为 class/interface/struct）");
-                }
-
-                var builder = new StringBuilder();
-                foreach (var node in nodes)
-                {
-                    builder.Append("类型 ").Append(node.Name).Append("（").Append(node.Kind).Append("，")
-                           .Append(node.Path).Append(':').Append(node.Line).Append("）\n");
-
-                    builder.Append("  基类 / 接口：")
-                           .Append(node.Bases.Count == 0 ? "（无）" : string.Join(", ", node.Bases))
-                           .Append('\n');
-
-                    // 派生类型：其它类型的 Bases 里出现了它
-                    var derived = _symbols
-                        .Where(s => s.Bases.Any(b => string.Equals(b, node.Name, StringComparison.Ordinal)))
-                        .Select(s => s.Name + " (" + s.Path + ")")
-                        .Distinct()
-                        .ToList();
-
-                    builder.Append("  已知派生 / 实现：")
-                           .Append(derived.Count == 0 ? "（无）" : string.Join(", ", derived))
-                           .Append('\n');
-                }
-
-                return Ok(builder.ToString().TrimEnd());
+                return Ok("没有在索引里找到类型 " + name + "（可能未被识别为 class/interface/struct）");
             }
+
+            var builder = new StringBuilder();
+            foreach (var node in nodes)
+            {
+                builder.Append("类型 ").Append(node.Name).Append("（").Append(node.Kind).Append("，")
+                       .Append(node.Path).Append(':').Append(node.Line).Append("）\n");
+
+                builder.Append("  基类 / 接口：")
+                       .Append(node.Bases.Count == 0 ? "（无）" : string.Join(", ", node.Bases))
+                       .Append('\n');
+
+                // 派生类型：其它类型的 Bases 里出现了它
+                var derived = snapshot.Symbols
+                    .Where(s => s.Bases.Any(b => string.Equals(b, node.Name, StringComparison.Ordinal)))
+                    .Select(s => s.Name + " (" + s.Path + ")")
+                    .Distinct()
+                    .ToList();
+
+                builder.Append("  已知派生 / 实现：")
+                       .Append(derived.Count == 0 ? "（无）" : string.Join(", ", derived))
+                       .Append('\n');
+            }
+
+            return Ok(builder.ToString().TrimEnd());
         }
 
         /// <summary>
@@ -316,29 +407,26 @@ namespace LangCode.Workspace
                 return Fail("未检测到工作区");
             }
 
-            lock (_gate)
+            var snapshot = EnsureBuilt();
+
+            var matches = snapshot.Symbols
+                .Where(s => s.Bases.Any(b => string.Equals(b, name, StringComparison.Ordinal)))
+                .ToList();
+
+            if (matches.Count == 0)
             {
-                EnsureBuilt();
-
-                var matches = _symbols
-                    .Where(s => s.Bases.Any(b => string.Equals(b, name, StringComparison.Ordinal)))
-                    .ToList();
-
-                if (matches.Count == 0)
-                {
-                    return Ok("没有找到实现 / 继承 " + name + " 的类型（可能名字拼写不同，或该类型只在外部程序集里）");
-                }
-
-                var builder = new StringBuilder();
-                builder.Append("实现 / 继承 ").Append(name).Append(" 的类型（").Append(matches.Count).Append(" 个）：\n");
-                foreach (var node in matches)
-                {
-                    builder.Append("  - ").Append(node.Kind).Append(' ').Append(node.Name)
-                           .Append("  ").Append(node.Path).Append(':').Append(node.Line).Append('\n');
-                }
-
-                return Ok(builder.ToString().TrimEnd());
+                return Ok("没有找到实现 / 继承 " + name + " 的类型（可能名字拼写不同，或该类型只在外部程序集里）");
             }
+
+            var builder = new StringBuilder();
+            builder.Append("实现 / 继承 ").Append(name).Append(" 的类型（").Append(matches.Count).Append(" 个）：\n");
+            foreach (var node in matches)
+            {
+                builder.Append("  - ").Append(node.Kind).Append(' ').Append(node.Name)
+                       .Append("  ").Append(node.Path).Append(':').Append(node.Line).Append('\n');
+            }
+
+            return Ok(builder.ToString().TrimEnd());
         }
 
         /// <summary>
@@ -346,27 +434,76 @@ namespace LangCode.Workspace
         /// </summary>
         public string Describe()
         {
-            lock (_gate)
-            {
-                EnsureBuilt();
-                return "语义索引：" + _chunkCount + " 个片段，" + (_postings?.Count ?? 0) + " 个词项，" +
-                       (_symbols?.Count ?? 0) + " 个类型节点";
-            }
+            var snapshot = EnsureBuilt();
+            return "语义索引：" + snapshot.ChunkCount + " 个片段，" + snapshot.Postings.Count + " 个词项，" +
+                   snapshot.Symbols.Count + " 个类型节点";
         }
 
         // ==================== 建索引 ====================
 
-        private void EnsureBuilt()
+        /// <summary>
+        /// 取一份可用快照：已有且未过期就直接用；否则（必要时等待）建一次
+        /// </summary>
+        /// <remarks>
+        /// 多个检索线程同时打进来时只会有一个真正建索引，其余等待同一个任务；
+        /// 等待期间<b>不持有任何锁</b>，构建线程可以正常发布结果。
+        /// </remarks>
+        private IndexSnapshot EnsureBuilt()
         {
-            if (_chunks != null && DateTime.UtcNow - _builtAtUtc < Ttl)
+            while (true)
+            {
+                var snapshot = _snapshot;
+                if (snapshot != null && DateTime.UtcNow - snapshot.BuiltAtUtc < Ttl)
+                {
+                    return snapshot;
+                }
+
+                Task build;
+                lock (_buildGate)
+                {
+                    snapshot = _snapshot;
+                    if (snapshot != null && DateTime.UtcNow - snapshot.BuiltAtUtc < Ttl)
+                    {
+                        return snapshot;
+                    }
+
+                    if (_buildTask == null || _buildTask.IsCompleted)
+                    {
+                        _buildTask = Task.Run((Action)BuildAndPublish);
+                    }
+
+                    build = _buildTask;
+                }
+
+                try
+                {
+                    build.Wait();
+                }
+                catch (AggregateException)
+                {
+                    // 构建失败：返回空快照，避免把调用方卡在循环里（下次查询会重试）
+                    return _snapshot ?? EmptySnapshot();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 后台建索引并发布；构建期间被失效（工作区改过）时丢弃这次结果
+        /// </summary>
+        private void BuildAndPublish()
+        {
+            var generation = Volatile.Read(ref _generation);
+            var snapshot = BuildSnapshot();
+
+            if (Volatile.Read(ref _generation) != generation)
             {
                 return;
             }
 
-            Build();
+            _snapshot = snapshot;
         }
 
-        private void Build()
+        private IndexSnapshot BuildSnapshot()
         {
             var chunks = new List<CodeChunk>();
             var symbols = new List<SymbolNode>();
@@ -416,19 +553,30 @@ namespace LangCode.Workspace
                 }
             }
 
-            _chunks = chunks;
-            _postings = postings;
-            _documentFrequency = df;
-            _pathFrequency = pathFreq;
-            _symbols = symbols;
-            _symbolsByName = symbols
-                .GroupBy(s => s.Name, StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
-            _chunkCount = Math.Max(1, chunks.Count);
-            _avgChunkLength = chunks.Count == 0
-                ? 1
-                : Math.Max(1, chunks.Average(c => c.Text.Length / 4.0));
-            _builtAtUtc = DateTime.UtcNow;
+            return new IndexSnapshot
+            {
+                Chunks = chunks,
+                Postings = postings,
+                DocumentFrequency = df,
+                PathFrequency = pathFreq,
+                Symbols = symbols,
+                SymbolsByName = symbols
+                    .GroupBy(s => s.Name, StringComparer.Ordinal)
+                    .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal),
+                ChunkCount = Math.Max(1, chunks.Count),
+                AvgChunkLength = chunks.Count == 0
+                    ? 1
+                    : Math.Max(1, chunks.Average(c => c.Text.Length / 4.0)),
+                BuiltAtUtc = DateTime.UtcNow,
+            };
+        }
+
+        /// <summary>
+        /// 构建失败时的占位快照：<see cref="IndexSnapshot.BuiltAtUtc"/> 保持最小值，下次调用会重试
+        /// </summary>
+        private static IndexSnapshot EmptySnapshot()
+        {
+            return new IndexSnapshot();
         }
 
         /// <summary>
@@ -670,16 +818,6 @@ namespace LangCode.Workspace
             }
 
             return count;
-        }
-
-        private double PathBoost(string path, string term)
-        {
-            if (_pathFrequency == null || string.IsNullOrEmpty(path))
-            {
-                return 0;
-            }
-
-            return path.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0 ? 1.0 : 0.0;
         }
 
         private static string TrimSnippet(string text)

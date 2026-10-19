@@ -220,6 +220,11 @@ namespace LangCode.Ui.ToolWindows
         private const string MentionViewTagPrefix = "#mention-view:";
 
         /// <summary>
+        /// 是否已经挂过「后台扫描完成后自动刷新」的回调（避免重复挂）
+        /// </summary>
+        private bool _mentionScanRefreshHooked;
+
+        /// <summary>
         /// 按关键词刷新提及候选
         /// </summary>
         private void RefreshMentions(string query)
@@ -234,6 +239,17 @@ namespace LangCode.Ui.ToolWindows
             }
 
             var text = (query ?? string.Empty).Trim();
+
+            // 需要文件表的视图（搜索 / 下钻）在后台扫描完成前不阻塞 UI：
+            // 先显示「扫描中」，扫完再自动刷新
+            if ((text.Length > 0 || _mentionView != MentionView.Root) &&
+                _mentions != null && _mentions.IsReady &&
+                !_mentions.TryGetAll(out _))
+            {
+                MentionList.Children.Add(MentionHint("正在后台扫描项目文件，稍候…"));
+                HookMentionScanRefresh();
+                return;
+            }
 
             switch (_mentionView)
             {
@@ -254,6 +270,32 @@ namespace LangCode.Ui.ToolWindows
             {
                 RenderMentionSearch(text);
             }
+        }
+
+        /// <summary>
+        /// 挂上「后台扫描完成后自动刷新弹层」的回调（只挂一次；弹层已关就不再刷新）
+        /// </summary>
+        private void HookMentionScanRefresh()
+        {
+            if (_mentionScanRefreshHooked || _mentions == null)
+            {
+                return;
+            }
+
+            _mentionScanRefreshHooked = true;
+            var index = _mentions;
+            index.WhenScanCompleted(() => Dispatcher.BeginInvoke(new Action(() =>
+            {
+                _mentionScanRefreshHooked = false;
+
+                // 期间换了工作区 / 关了弹层：这次回调作废
+                if (!ReferenceEquals(index, _mentions) || !MentionPopup.IsOpen)
+                {
+                    return;
+                }
+
+                RefreshMentions(MentionQuery() ?? string.Empty);
+            })));
         }
 
         /// <summary>

@@ -161,6 +161,23 @@ namespace LangCode.Ui.ToolWindows
         private WorkspaceIndex _mentions;
 
         /// <summary>
+        /// 语义索引：跨轮次复用并在后台预热；换工作区时按新根目录重建
+        /// </summary>
+        private SemanticIndex _semanticIndex;
+
+        /// <summary>
+        /// 上面那个语义索引对应的根目录
+        /// </summary>
+        private string _semanticIndexRoot = string.Empty;
+
+        /// <summary>
+        /// 建语义索引时用的规模参数（设置里调整后需要按新值重建）
+        /// </summary>
+        private int _semanticIndexMaxFiles;
+
+        private int _semanticIndexMaxChunkChars;
+
+        /// <summary>
         /// 工作区根目录（提及 / 跟随打开 / Git 都要用）
         /// </summary>
         private string _workspaceRoot = string.Empty;
@@ -555,6 +572,8 @@ namespace LangCode.Ui.ToolWindows
             {
                 _workspace = null;
                 _mentions = null;
+                _semanticIndex = null;
+                _semanticIndexRoot = string.Empty;
                 _workspaceRoot = string.Empty;
                 _workspaceNoticeShown = false;
             }
@@ -576,13 +595,58 @@ namespace LangCode.Ui.ToolWindows
                 // @ 提及的候选表：只跟根目录有关，和文件工具是否可用无关
                 _mentions = new WorkspaceIndex(root);
                 _workspaceRoot = root;
+
+                // 两个索引都在后台预热：用户真正点 @ / 让 Agent 检索时，数据已经就绪
+                _mentions.StartBackgroundScan();
+                EnsureSemanticIndex();
             }
             catch (Exception)
             {
                 _workspace = null;
                 _mentions = null;
+                _semanticIndex = null;
+                _semanticIndexRoot = string.Empty;
                 _workspaceRoot = string.Empty;
             }
+        }
+
+        /// <summary>
+        /// 取当前工作区的语义索引（懒建）：根目录变了就按新根目录重建，并在后台预热。
+        /// 索引跨轮次复用，避免每轮对话都重新扫一遍仓库。
+        /// </summary>
+        private SemanticIndex EnsureSemanticIndex()
+        {
+            var root = _workspaceRoot;
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                return null;
+            }
+
+            var maxFiles = _settings?.SemanticIndexMaxFiles ?? 2000;
+            var maxChunkChars = _settings?.SemanticChunkChars ?? 1600;
+
+            if (_semanticIndex == null ||
+                !string.Equals(_semanticIndexRoot, root, StringComparison.OrdinalIgnoreCase) ||
+                maxFiles != _semanticIndexMaxFiles ||
+                maxChunkChars != _semanticIndexMaxChunkChars)
+            {
+                _semanticIndex = new SemanticIndex(root)
+                {
+                    MaxFiles = maxFiles,
+                    MaxChunkChars = maxChunkChars,
+                };
+                _semanticIndexRoot = root;
+                _semanticIndexMaxFiles = maxFiles;
+                _semanticIndexMaxChunkChars = maxChunkChars;
+            }
+
+            // 设置里关掉语义索引时不预热（工具调用本来也会拒绝）
+            if (_settings == null || _settings.SemanticIndex)
+            {
+                _semanticIndex.StartBackgroundBuild();
+            }
+
+            return _semanticIndex;
         }
 
         // ============================================================
@@ -723,11 +787,16 @@ namespace LangCode.Ui.ToolWindows
             if (_mentions == null)
             {
                 _mentions = new WorkspaceIndex(root);
+                _mentions.StartBackgroundScan();
             }
             else if (forceRescan)
             {
                 _mentions.Invalidate();
+                _mentions.StartBackgroundScan();
             }
+
+            // 语义索引同样按当前根目录预热（已经是同一个索引时只是确保后台建好）
+            EnsureSemanticIndex();
         }
 
         // ============================================================
@@ -791,6 +860,9 @@ namespace LangCode.Ui.ToolWindows
             _session.ContextWindow = _settings.ContextWindow;
             ApplySettingsToUi();
             UpdateTokens();
+
+            // 语义索引开关 / 规模调整后按新配置预热（关掉时不预热；参数没变时是空操作）
+            EnsureSemanticIndex();
         }
 
         private static Brush BrushFor(string hex)

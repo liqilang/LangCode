@@ -285,7 +285,10 @@ namespace LangCode.Agent
         /// </summary>
         private readonly McpManager _mcp = new McpManager();
 
-        public AgentRunner(IChatBackend backend, FileSystemWorkspace workspace, AppSettings settings)
+        /// <param name="sharedIndex">
+        /// 由界面持有、跨轮次复用的语义索引（已后台预热）。为 null 时按本轮工作区新建。
+        /// </param>
+        public AgentRunner(IChatBackend backend, FileSystemWorkspace workspace, AppSettings settings, SemanticIndex sharedIndex = null)
         {
             _backend = backend;
             _workspace = workspace;
@@ -308,7 +311,7 @@ namespace LangCode.Agent
                 ExecutablePath = settings?.BrowserExecutablePath ?? string.Empty,
                 TimeoutSeconds = settings?.BrowserTimeoutSeconds ?? 30,
             };
-            _index = new SemanticIndex(root)
+            _index = sharedIndex ?? new SemanticIndex(root)
             {
                 MaxFiles = settings?.SemanticIndexMaxFiles ?? 2000,
                 MaxChunkChars = settings?.SemanticChunkChars ?? 1600,

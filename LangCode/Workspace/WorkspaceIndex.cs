@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace LangCode.Workspace
 {
@@ -62,6 +63,21 @@ namespace LangCode.Workspace
 
         private List<MentionItem> _items;
 
+        /// <summary>
+        /// 当前正在跑的扫描任务：后台预热与用户打开弹层同时发生时只扫一遍
+        /// </summary>
+        private Task<List<MentionItem>> _scanTask;
+
+        /// <summary>
+        /// 任务对应的版本号：<see cref="Invalidate"/> 后旧任务的结果会被丢弃
+        /// </summary>
+        private int _scanGeneration;
+
+        /// <summary>
+        /// <see cref="_scanTask"/> 启动时的版本号（与当前版本不一致就要重扫）
+        /// </summary>
+        private int _scanTaskGeneration;
+
         public WorkspaceIndex(string root)
         {
             _root = (root ?? string.Empty).TrimEnd('\\', '/');
@@ -79,13 +95,154 @@ namespace LangCode.Workspace
         {
             get
             {
-                lock (_gate)
+                while (true)
                 {
-                    _items ??= Scan();
+                    int generation;
+                    Task<List<MentionItem>> scan;
+                    lock (_gate)
+                    {
+                        if (_items != null)
+                        {
+                            return _items;
+                        }
 
-                    return _items;
+                        generation = _scanGeneration;
+                        if (_scanTask == null || _scanTask.IsCompleted || _scanTaskGeneration != generation)
+                        {
+                            _scanTask = Task.Run(Scan);
+                            _scanTaskGeneration = generation;
+                        }
+
+                        scan = _scanTask;
+                    }
+
+                    // 扫描在读盘，别握着锁；其它调用者会等同一个任务
+                    List<MentionItem> items;
+                    try
+                    {
+                        items = scan.Result;
+                    }
+                    catch (AggregateException)
+                    {
+                        items = new List<MentionItem>();
+                    }
+
+                    lock (_gate)
+                    {
+                        if (_scanGeneration != generation)
+                        {
+                            continue; // 扫描期间被失效：结果已过期，重扫
+                        }
+
+                        _items = items;
+                        return _items;
+                    }
                 }
             }
+        }
+
+        /// <summary>
+        /// 非阻塞取快照：还没扫完时返回 <c>false</c>（同时确保后台扫描已启动），界面可以据此显示「扫描中」
+        /// </summary>
+        public bool TryGetAll(out IList<MentionItem> items)
+        {
+            lock (_gate)
+            {
+                if (_items != null)
+                {
+                    items = _items;
+                    return true;
+                }
+
+                if (_scanTask != null && _scanTask.IsCompleted && _scanTaskGeneration == _scanGeneration)
+                {
+                    _items = Complete(_scanTask);
+                    items = _items;
+                    return true;
+                }
+
+                if (_scanTask == null || _scanTask.IsCompleted || _scanTaskGeneration != _scanGeneration)
+                {
+                    _scanTask = Task.Run(Scan);
+                    _scanTaskGeneration = _scanGeneration;
+                }
+
+                items = Array.Empty<MentionItem>();
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 扫描完成时在后台线程回调一次（用于界面在「扫描中」之后自动刷新）
+        /// </summary>
+        public void WhenScanCompleted(Action callback)
+        {
+            if (callback == null)
+            {
+                return;
+            }
+
+            Task<List<MentionItem>> scan;
+            lock (_gate)
+            {
+                if (_items != null)
+                {
+                    scan = null;
+                }
+                else
+                {
+                    if (_scanTask == null || _scanTask.IsCompleted || _scanTaskGeneration != _scanGeneration)
+                    {
+                        _scanTask = Task.Run(Scan);
+                        _scanTaskGeneration = _scanGeneration;
+                    }
+
+                    scan = _scanTask;
+                }
+            }
+
+            if (scan == null)
+            {
+                callback();
+                return;
+            }
+
+            scan.ContinueWith(_ => callback(), TaskScheduler.Default);
+        }
+
+        private static List<MentionItem> Complete(Task<List<MentionItem>> scan)
+        {
+            try
+            {
+                return scan.Result ?? new List<MentionItem>();
+            }
+            catch (AggregateException)
+            {
+                return new List<MentionItem>();
+            }
+        }
+
+        /// <summary>
+        /// 后台预热：打开工具窗口 / 切换工作区时先把文件表扫出来，用户点 @ 时不用等
+        /// </summary>
+        public void StartBackgroundScan()
+        {
+            if (!IsReady)
+            {
+                return;
+            }
+
+            Task.Run(() =>
+            {
+                try
+                {
+                    _ = All;
+                }
+                catch (Exception)
+                {
+                    // 扫描失败时保持空表，用户点 @ 时会再试一次
+                }
+            });
         }
 
         /// <summary>
@@ -96,6 +253,7 @@ namespace LangCode.Workspace
             lock (_gate)
             {
                 _items = null;
+                _scanGeneration++;
             }
         }
 

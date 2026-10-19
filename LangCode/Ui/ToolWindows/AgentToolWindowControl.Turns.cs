@@ -281,7 +281,8 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private async Task RunAgentAsync(IChatBackend backend, IList<ChatTurn> turns, ChatMessage assistant, CancellationToken token)
         {
-            var runner = new AgentRunner(backend, _workspace, _settings)
+            // 语义索引跨轮次复用（界面在后台预热过）：首轮 semantic_search 不必再全仓库同步扫描
+            var runner = new AgentRunner(backend, _workspace, _settings, EnsureSemanticIndex())
             {
                 // 用量 / 审计按会话归集：之前这里没赋值，所有记录都落在空 id 上
                 ConversationId = _session.ConversationId,
