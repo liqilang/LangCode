@@ -52,7 +52,7 @@ namespace LangCode.Workspace
         /// </summary>
         private static readonly HashSet<string> IgnoredDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "bin", "obj", "node_modules", ".git", ".vs", ".idea", ".vscode",
+            "bin", "obj", "node_modules", ".git", ".vs", ".idea", ".vscode", ".langcode",
             "packages", "dist", "build", "out", "target", ".next", "coverage",
             "__pycache__", ".venv", "venv", "vendor", "Debug", "Release",
         };

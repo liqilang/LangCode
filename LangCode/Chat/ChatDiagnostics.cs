@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace LangCode.Chat
 {
@@ -65,9 +66,34 @@ namespace LangCode.Chat
                 builder.Append("生成时间：").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")).Append('\n');
                 builder.Append("缓冲字符数：").Append(Buffer.Length).Append('\n');
                 builder.Append("----------------------------------------\n");
-                builder.Append(Buffer);
+                builder.Append(Sanitize(Buffer.ToString()));
                 return builder.ToString();
             }
+        }
+
+        /// <summary>
+        /// 导出前对常见密钥格式做脱敏 
+        /// </summary>
+        private static string Sanitize(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            var value = Regex.Replace(
+                text,
+                @"(?i)(authorization[""'\s:=]+bearer\s+)[^\s""',}]+",
+                "$1***");
+            value = Regex.Replace(
+                value,
+                @"(?i)((?:x-api-key|api[_-]?key|access[_-]?token)[""'\s:=]+)[^\s""',}]{8,}",
+                "$1***");
+            value = Regex.Replace(
+                value,
+                @"(?i)\bsk-[A-Za-z0-9_\-]{8,}",
+                "sk-***");
+            return value;
         }
 
         public static void Clear()

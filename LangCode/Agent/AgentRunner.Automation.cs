@@ -41,7 +41,7 @@ namespace LangCode.Agent
                 var label = autoDetected ? verifyCommand + "（自动探测）" : verifyCommand;
 
                 callbacks.OnNotice?.Invoke("自动验证：" + label);
-                var result = _commands.Run(verifyCommand, string.Empty, callbacks.OnCommandOutput);
+                var result = await _commands.RunAsync(verifyCommand, string.Empty, callbacks.OnCommandOutput, cancellationToken).ConfigureAwait(false);
 
                 callbacks.OnNotice?.Invoke("自动验证" + (result.Ok ? "通过" : "失败") + "：" + label);
 

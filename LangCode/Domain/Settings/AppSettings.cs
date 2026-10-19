@@ -175,8 +175,12 @@ namespace LangCode.Domain.Settings
         [DataMember(Name = "autoApproveReads", Order = 9)]
         public bool AutoApproveReads { get; set; } = true;
 
+        /// <summary>
+        /// 编辑已有文件默认必须确认：安全承诺是「改之前先给你看差异」，
+        /// 需要更顺手的用户可以在设置里显式打开这一类。
+        /// </summary>
         [DataMember(Name = "autoApproveEdits", Order = 10)]
-        public bool AutoApproveEdits { get; set; } = true;
+        public bool AutoApproveEdits { get; set; }
 
         [DataMember(Name = "autoApproveCreates", Order = 11)]
         public bool AutoApproveCreates { get; set; }
@@ -278,8 +282,12 @@ namespace LangCode.Domain.Settings
         [DataMember(Name = "mcpServers", Order = 40)]
         public List<McpServerSettings> McpServers { get; set; } = [];
 
+        /// <summary>
+        /// 打开工具窗口时是否自动连接 MCP。默认关闭：MCP 服务器通常是
+        /// <c>npx ...</c>，自动连接会在用户没同意的情况下触发网络下载 / 启动第三方进程。
+        /// </summary>
         [DataMember(Name = "autoConnectMcp", Order = 41)]
-        public bool AutoConnectMcp { get; set; } = true;
+        public bool AutoConnectMcp { get; set; }
 
         [DataMember(Name = "confirmMcpTools", Order = 42)]
         public bool ConfirmMcpTools { get; set; }

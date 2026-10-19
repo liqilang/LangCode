@@ -179,6 +179,50 @@ namespace LangCode.VsIntegration
         }
 
         /// <summary>
+        /// 某个文件是否在 VS 编辑器里有未保存改动（文件没打开时返回 false）
+        /// </summary>
+        public static bool IsDocumentDirty(string absolutePath)
+        {
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (string.IsNullOrWhiteSpace(absolutePath))
+            {
+                return false;
+            }
+
+            var dte = GetDte();
+            if (dte == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                foreach (EnvDTE.Document document in dte.Documents)
+                {
+                    try
+                    {
+                        if (string.Equals(document.FullName, absolutePath, StringComparison.OrdinalIgnoreCase) &&
+                            !document.Saved)
+                        {
+                            return true;
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // 单个文档属性不可读：跳过
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // 文档集合不可用：按「不脏」处理，保持原有行为
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// 取编辑器里当前选中的文本（没有选中 / 拿不到 DTE 时返回 null）
         /// </summary>
         public static string TryGetSelection()
@@ -226,9 +270,11 @@ namespace LangCode.VsIntegration
             try
             {
                 var full = Path.GetFullPath(Path.Combine(root, relativePath.Replace('/', '\\')));
-                var normalizedRoot = Path.GetFullPath(root);
+                var normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-                if (!full.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+                // 带分隔符比较：C:\repo 不能放行 C:\repo-old
+                if (!string.Equals(full, normalizedRoot, StringComparison.OrdinalIgnoreCase) &&
+                    !full.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 {
                     return null;
                 }

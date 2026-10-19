@@ -399,14 +399,10 @@ namespace LangCode.Workspace
                 }
             }
 
-            if (firstPage != null)
-            {
-                return firstPage;
-            }
-
-            // 没有任何页面：新建一个（新版 Chrome 要求 PUT）
+            // 没有 about:blank 时优先新建标签页，而不是直接接管用户已经打开的页面。
+            // 只有新标签创建失败时才退回第一个页面，避免误读 / 误点用户的个人标签。
             var created = await CreateNewTabAsync(token).ConfigureAwait(false);
-            return created;
+            return created ?? firstPage;
         }
 
         /// <summary>

@@ -102,7 +102,7 @@ namespace LangCode.Agent
                 "正则搜索：{\"tool\":\"search_text\",\"pattern\":\"useTheme\",\"glob\":\"*.tsx\"}"),
 
             new ToolDescriptor("write_file", "整文件写入（新建或整体重写）", "{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}}", "[\"path\",\"content\"]", ToolDispatch.Local, true, ApprovalCatalog.Create, 4,
-                "整文件写入：{\"tool\":\"write_file\",\"path\":\"src/New.tsx\",\"content\":\"...\"}"),
+                "整文件写入：{\"tool\":\"write_file\",\"path\":\"src/New.tsx\",\"content\":\"...\"}\n   · content 是 JSON 字符串：换行要转义为 \\n，三反引号要写成 \\u0060（否则会提前结束动作块）"),
 
             new ToolDescriptor("replace_in_file", "局部替换：old_text 必须在文件里唯一", "{\"path\":{\"type\":\"string\"},\"old_text\":{\"type\":\"string\"},\"new_text\":{\"type\":\"string\"},\"replace_all\":{\"type\":\"string\",\"description\":\"填 true 时替换全部匹配\"}}", "[\"path\",\"old_text\",\"new_text\"]", ToolDispatch.Local, true, ApprovalCatalog.Edit, 5,
                 "局部替换：{\"tool\":\"replace_in_file\",\"path\":\"src/App.tsx\",\"old_text\":\"旧片段\",\"new_text\":\"新片段\"}\n   · old_text 必须在文件里**唯一**（带上足够上下文）；确实要全部替换时才加 \"replace_all\":\"true\""),
@@ -126,7 +126,7 @@ namespace LangCode.Agent
                 "向用户提问：{\"tool\":\"ask_followup_question\",\"question\":\"要选哪个方案？\",\"options\":\"方案A|方案B|方案C\"}\n   · options 用 | 分隔备选答案（可省略，用户也可以自由输入）；收到回答前会一直等待"),
 
             new ToolDescriptor("new_task", "把一个相对独立的活拆成子任务独立完成", "{\"task\":{\"type\":\"string\"},\"context\":{\"type\":\"string\"}}", "[\"task\"]", ToolDispatch.Orchestration, false, ApprovalCatalog.Unknown, 11,
-                "拆分子任务：{\"tool\":\"new_task\",\"task\":\"实现登录页的表单校验\",\"context\":\"相关文件 src/Login.tsx\"}\n   · 子任务会带着你给的 task/context 独立跑一轮，做完把结论带回给你"),
+                "拆分子任务：{\"tool\":\"new_task\",\"task\":\"实现登录页的表单校验\",\"context\":\"相关文件 src/Login.tsx\"}\n   · 子任务会带着你给的 task/context 独立跑一轮，做完把结论带回给你\n   · task/context 是 JSON 字符串：换行要转义为 \\n，三反引号要写成 \\u0060；不要把 Markdown 代码块原样贴进去"),
 
             new ToolDescriptor("list_symbols", "列出文件里的类 / 方法 / 函数及行号（C# 走 Roslyn，含签名）", "{\"path\":{\"type\":\"string\"}}", "[\"path\"]", ToolDispatch.Local, false, ApprovalCatalog.Read, 13,
                 "列出文件符号：{\"tool\":\"list_symbols\",\"path\":\"src/App.tsx\"}"),
@@ -155,8 +155,8 @@ namespace LangCode.Agent
             new ToolDescriptor("run_tests", "运行工作区测试（自动识别 dotnet test / npm test / pytest / cargo test / go test；dotnet test 会返回结构化通过/失败统计与失败用例）", "{\"filter\":{\"type\":\"string\",\"description\":\"仅 dotnet test 生效：--filter 表达式\"}}", "[]", ToolDispatch.External, true, ApprovalCatalog.Command, 21,
                 "运行测试：{\"tool\":\"run_tests\"} 或 {\"tool\":\"run_tests\",\"filter\":\"FullyQualifiedName~Login\"}\n   · 自动按技术栈选命令（dotnet test / npm test / pytest / cargo test / go test）；filter 仅对 dotnet test 生效\n   · dotnet test 会返回结构化的通过/失败统计与失败用例堆栈，可直接据此定位与修复"),
 
-            new ToolDescriptor("rename_symbol", "跨文件重命名符号（Roslyn 语法级，自动跳过字符串/注释；逐文件审批后落盘）", "{\"symbol\":{\"type\":\"string\"},\"new_name\":{\"type\":\"string\"},\"glob\":{\"type\":\"string\"}}", "[\"symbol\",\"new_name\"]", ToolDispatch.Orchestration, true, ApprovalCatalog.Edit, 22,
-                "跨文件重命名：{\"tool\":\"rename_symbol\",\"symbol\":\"OldName\",\"new_name\":\"NewName\",\"glob\":\"*.cs\"}\n   · Roslyn 语法级：自动跳过字符串与注释；会逐文件列出差异卡等你确认（比手动 replace_in_file 更可靠）\n   · 重命名一个已存在的类型 / 方法 / 字段时优先用它，不要手写多处 replace_in_file"),
+            new ToolDescriptor("rename_symbol", "跨文件重命名符号（Roslyn 语义级，只改真正绑定到该符号的标识符；逐文件审批后落盘）", "{\"symbol\":{\"type\":\"string\"},\"new_name\":{\"type\":\"string\"},\"glob\":{\"type\":\"string\"}}", "[\"symbol\",\"new_name\"]", ToolDispatch.Orchestration, true, ApprovalCatalog.Edit, 22,
+                "跨文件重命名：{\"tool\":\"rename_symbol\",\"symbol\":\"OldName\",\"new_name\":\"NewName\",\"glob\":\"*.cs\"}\n   · Roslyn 语义级：只改真正绑定到该符号的标识符，自动跳过字符串、注释与同名局部变量；会逐文件列出差异卡等你确认\n   · 重命名一个已存在的类型 / 方法 / 字段时优先用它，不要手写多处 replace_in_file"),
 
             new ToolDescriptor("debug_inspect", "只读查看调试器：断点列表 / 调用栈 / 局部变量与参数 / 表达式求值 / 状态", "{\"action\":{\"type\":\"string\",\"description\":\"list_breakpoints / get_stack / get_locals / evaluate / status\"},\"expression\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\"}}", "[\"action\"]", ToolDispatch.External, false, ApprovalCatalog.Read, 23,
                 "查看调试器（只读）：{\"tool\":\"debug_inspect\",\"action\":\"get_stack\"} 或 {\"action\":\"evaluate\",\"expression\":\"user.Name\"}\n   · action：list_breakpoints / get_stack / get_locals / evaluate / status；仅在 VS 里处于调试、且有活动栈帧时有效"),

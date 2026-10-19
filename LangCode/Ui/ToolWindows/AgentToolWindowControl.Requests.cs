@@ -66,6 +66,10 @@ namespace LangCode.Ui.ToolWindows
             _turnCanContinue = false;
             _turnInterrupted = false;
             _turnCanRetry = false;
+
+            // 新一轮开始：允许重新弹审批 / 提问
+            _approvalCancelled = false;
+            _questionCancelled = false;
         }
 
         /// <summary>
@@ -748,14 +752,14 @@ namespace LangCode.Ui.ToolWindows
         }
 
         /// <summary>
-        /// 审批一次写入：自动批准直接放行；否则加一张 Diff 卡等待用户点按钮
+        /// 审批一次写入。是否自动批准已由 <see cref="AgentRunner"/> 按工具的真实类别
+        /// （新增 / 编辑）判定；走到这里就一定要让用户看到差异并拍板，
+        /// 不能再用 <c>AutoApproveEdits</c> 二次判断，否则会绕过「新增文件」的独立开关。
         /// </summary>
         private Task<bool> ApproveEditAsync(ChatMessage message, PendingEdit edit)
         {
             return Dispatcher.InvokeAsync(() =>
             {
-                var auto = _settings.AutoApproveEdits;
-
                 // 标题说清这是「新增文件」还是「编辑文件」；是否已落盘由状态文案（已应用）与
                 // 底栏（等待确认）表达，标题本身不必再分 Proposed / Applied
                 var card = new ChatBlock
@@ -769,45 +773,46 @@ namespace LangCode.Ui.ToolWindows
                     // 待审批时看的是「提议的内容」（此时磁盘上还没有改动）
                     BeforeText = edit.OriginalText ?? string.Empty,
                     AfterText = edit.NewText ?? string.Empty,
+                    IsPendingApproval = true,
                 };
 
-                // 自动批准：只留一条「已应用」的记录，不出现任何按钮
-                if (auto)
-                {
-                    card.IsAccepted = true;
-                    card.StatusText = "已应用";
-
-                    // 设置里的「长文默认折叠」关掉时，差异卡片直接摊开
-                    card.IsBodyVisible = !_settings.CollapseLongText;
-
-                    message.Blocks.Add(card);
-                    ScrollToEnd();
-                    return Task.FromResult(true);
-                }
-
-                // 待批：卡片只负责「看得见的差异」，允许 / 拒绝在输入框上方的请求条上点
-                card.IsPendingApproval = true;
                 message.Blocks.Add(card);
-
                 return WaitForApproval(card);
             }).Task.Unwrap();
         }
 
         /// <summary>
-        /// 把一张待批卡片接到请求条上，返回「等用户点允许 / 拒绝」的任务
+        /// 把一张待批卡片接到请求条上，返回「等用户点允许 / 拒绝」的任务。
+        /// 并行子任务可能同时请求审批，这里用信号量串行化：一次只显示一张。
         /// </summary>
-        private Task<bool> WaitForApproval(ChatBlock card)
+        private async Task<bool> WaitForApproval(ChatBlock card)
         {
-            _pendingCard = card;
-            _pendingApproval = new TaskCompletionSource<bool>();
+            await _approvalGate.WaitAsync().ConfigureAwait(true);
+            try
+            {
+                if (_approvalCancelled)
+                {
+                    card.IsPendingApproval = false;
+                    card.IsRejected = true;
+                    card.StatusText = "已取消";
+                    return false;
+                }
 
-            // 待批是阻塞的：用户在别的窗口时也要能立刻知道「这里卡住了」
-            NotifyIfEnabled("LangCode：有一个操作等待你确认", beep: true);
+                _pendingCard = card;
+                _pendingApproval = new TaskCompletionSource<bool>();
 
-            RefreshRequestBar();
-            ScrollToEnd();
+                // 待批是阻塞的：用户在别的窗口时也要能立刻知道「这里卡住了」
+                NotifyIfEnabled("LangCode：有一个操作等待你确认", beep: true);
 
-            return _pendingApproval.Task;
+                RefreshRequestBar();
+                ScrollToEnd();
+
+                return await _pendingApproval.Task.ConfigureAwait(true);
+            }
+            finally
+            {
+                _approvalGate.Release();
+            }
         }
 
     }

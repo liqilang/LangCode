@@ -115,6 +115,13 @@ namespace LangCode.Agent
                     continue;
                 }
 
+                var blocked = CheckFileDirty(pending, callbacks);
+                if (blocked != null)
+                {
+                    summary.Append("✗ ").Append(section.Path).Append("：").Append(blocked.Output).Append('\n');
+                    continue;
+                }
+
                 var result = _workspace.Apply(pending);
                 if (result.Ok)
                 {
@@ -270,6 +277,7 @@ namespace LangCode.Agent
                 OnStepLimit = callbacks.OnStepLimit,
                 AskQuestionAsync = callbacks.AskQuestionAsync,
                 OnTodoUpdate = callbacks.OnTodoUpdate,
+                IsFileDirty = callbacks.IsFileDirty,
 
                 // 子任务不再往下拆（上面已按深度挡住），所以不给它 RunSubTaskAsync
 
@@ -291,6 +299,7 @@ namespace LangCode.Agent
             {
                 MaxSteps = MaxSteps,
                 SubTaskDepth = SubTaskDepth + 1,
+                ConversationId = ConversationId,
             };
 
             await subRunner.RunAsync(subTurns, subCallbacks, cancellationToken).ConfigureAwait(false);
@@ -344,6 +353,13 @@ namespace LangCode.Agent
                 if (!approved)
                 {
                     summary.Append("✗ ").Append(pending.RelativePath).Append("：用户拒绝了这一处改名\n");
+                    continue;
+                }
+
+                var blocked = CheckFileDirty(pending, callbacks);
+                if (blocked != null)
+                {
+                    summary.Append("✗ ").Append(pending.RelativePath).Append("：").Append(blocked.Output).Append('\n');
                     continue;
                 }
 

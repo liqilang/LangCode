@@ -52,7 +52,7 @@ namespace LangCode.Workspace
     {
         private static readonly string[] IgnoredDirectories =
         {
-            ".git", ".vs", ".idea", ".vscode", "bin", "obj", "node_modules", "packages",
+            ".git", ".vs", ".idea", ".vscode", ".langcode", "bin", "obj", "node_modules", "packages",
             "TestResults", ".next", "dist", "build", "out", "target", "coverage", "__pycache__",
             ".venv", "venv", "vendor", "Debug", "Release",
         };

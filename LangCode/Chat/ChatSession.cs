@@ -555,7 +555,9 @@ namespace LangCode.Chat
                 }
             }
 
-            return Compact(turns);
+            // 不在这里做第二次「直接丢弃」式压缩：RunTurnAsync 之前已经调用
+            // CompactIfNeededAsync 做过总结式压缩，再压一次会把刚生成的摘要也丢掉。
+            return turns;
         }
 
         /// <summary>

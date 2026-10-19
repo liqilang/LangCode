@@ -2,6 +2,7 @@
 using LangCode.Chat;
 using LangCode.Domain.Chat;
 using LangCode.VsIntegration;
+using LangCode.Workspace;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -62,6 +63,11 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private async Task RunTurnAsync(ChatMessage userMessage, string resumeHint = null, bool includeAutoContext = false)
         {
+            // 恢复 / 继续 / 排队也走这里：上一轮取消时置位的标志必须在这里清掉，
+            // 否则新一轮的审批会被误判成「已取消」。
+            _approvalCancelled = false;
+            _questionCancelled = false;
+
             // 新一轮 = 新的一份任务清单 / 新的子任务：上一轮的进度卡与子任务卡都不再复用
             _todoCard = null;
             _subTaskCard = null;
@@ -275,7 +281,11 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private async Task RunAgentAsync(IChatBackend backend, IList<ChatTurn> turns, ChatMessage assistant, CancellationToken token)
         {
-            var runner = new AgentRunner(backend, _workspace, _settings);
+            var runner = new AgentRunner(backend, _workspace, _settings)
+            {
+                // 用量 / 审计按会话归集：之前这里没赋值，所有记录都落在空 id 上
+                ConversationId = _session.ConversationId,
+            };
 
             var callbacks = new AgentCallbacks
             {
@@ -356,6 +366,10 @@ namespace LangCode.Ui.ToolWindows
                                 edit.Diff.Count(line => line.Kind == DiffLineKind.Add),
                                 edit.Diff.Count(line => line.Kind == DiffLineKind.Delete));
 
+                            // 新建 / 删除文件后 @ 提及索引与工具链探测缓存要失效
+                            _mentions?.Invalidate();
+                            ToolchainDetector.Invalidate();
+
                             // 对话里的「编辑文件 / 新增文件」记录：自动批准不会经过审批卡，
                             // 不在这里补一张卡的话，文件被改了对话里却什么都看不到
                             RecordAppliedEditCard(assistant, edit);
@@ -410,6 +424,9 @@ namespace LangCode.Ui.ToolWindows
                 DebugControlAsync = (command, cancellationToken) => Dispatcher
                     .InvokeAsync(() => VsDebuggerController.Execute(command, _workspaceRoot))
                     .Task,
+
+                // 未保存的编辑器缓冲区不能被 AI 的磁盘写入覆盖
+                IsFileDirty = relativePath => Dispatcher.Invoke(() => VsFileOpener.IsDocumentDirty(ResolveInRoot(relativePath))),
 
                 // 自动验证 / 自动修复过程中的便签（复用当前助手消息）
                 OnNotice = text => Dispatcher.BeginInvoke(

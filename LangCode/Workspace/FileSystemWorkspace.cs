@@ -38,6 +38,16 @@ namespace LangCode.Workspace
         public bool Ok { get; set; }
 
         /// <summary>
+        /// 命令退出码（仅命令类工具使用；-1 表示未执行 / 被取消）
+        /// </summary>
+        public int ExitCode { get; set; }
+
+        /// <summary>
+        /// 命令是否因为用户取消而终止
+        /// </summary>
+        public bool Canceled { get; set; }
+
+        /// <summary>
         /// 回灌给模型的文本
         /// </summary>
         public string Output { get; set; } = string.Empty;
@@ -55,7 +65,7 @@ namespace LangCode.Workspace
     {
         private static readonly string[] IgnoredDirectories =
         {
-            ".git", ".vs", ".idea", "bin", "obj", "node_modules", "packages", "TestResults", ".next", "dist", "build",
+            ".git", ".vs", ".idea", ".langcode", "bin", "obj", "node_modules", "packages", "TestResults", ".next", "dist", "build",
         };
 
         private readonly string _root;
@@ -320,19 +330,23 @@ namespace LangCode.Workspace
         /// </summary>
         private bool IsIgnoredDirectory(string fullPath)
         {
-            if (IsIgnoredByName(fullPath))
-            {
-                return true;
-            }
-
             var root = RootOf(fullPath);
             if (root == null)
             {
                 return false;
             }
 
+            var relative = RelativeTo(fullPath, root);
+
+            // 只看工作区内的相对路径：工作区本身位于 D:\build\repo 时，
+            // 不能因为祖先目录叫 build 就把整个工作区忽略掉。
+            if (relative.Length > 0 && IsIgnoredByName(relative))
+            {
+                return true;
+            }
+
             var matcher = MatcherFor(root);
-            return matcher != null && matcher.IsIgnored(RelativeTo(fullPath, root), true);
+            return matcher != null && matcher.IsIgnored(relative, true);
         }
 
         /// <summary>
@@ -365,7 +379,8 @@ namespace LangCode.Workspace
         /// </summary>
         public IList<string> ListFiles(string glob, int maxDepth = 6)
         {
-            var pattern = string.IsNullOrWhiteSpace(glob) ? "*" : glob.Trim();
+            // 不传 glob = 递归列出全部文件；显式 glob 按标准语义匹配
+            var pattern = string.IsNullOrWhiteSpace(glob) ? "**" : glob.Trim();
             var regex = GlobToRegex(pattern);
             var results = new List<string>();
 
@@ -442,7 +457,7 @@ namespace LangCode.Workspace
 
                 // Compiled：一轮任务里同一模式会匹配上万行，解释执行的正则开销很明显
                 var regex = new Regex(pattern, RegexOptions.CultureInvariant | RegexOptions.Compiled);
-                var fileRegex = GlobToRegex(string.IsNullOrWhiteSpace(glob) ? "*" : glob.Trim());
+                var fileRegex = GlobToRegex(string.IsNullOrWhiteSpace(glob) ? "**" : glob.Trim());
                 var builder = new StringBuilder();
                 var hits = 0;
 
@@ -608,7 +623,7 @@ namespace LangCode.Workspace
             try
             {
                 var limit = maxResults <= 0 ? MaxResults : maxResults;
-                var fileRegex = GlobToRegex(string.IsNullOrWhiteSpace(glob) ? "*" : glob.Trim());
+                var fileRegex = GlobToRegex(string.IsNullOrWhiteSpace(glob) ? "**" : glob.Trim());
                 var builder = new StringBuilder();
                 var hits = 0;
                 var files = 0;
@@ -848,10 +863,13 @@ namespace LangCode.Workspace
 
             var limit = maxFiles <= 0 ? 40 : maxFiles;
             var pendings = new List<PendingEdit>();
-            var fileRegex = GlobToRegex(string.IsNullOrWhiteSpace(glob) ? "*" : glob.Trim());
+            var fileRegex = GlobToRegex(string.IsNullOrWhiteSpace(glob) ? "**" : glob.Trim());
 
             try
             {
+                var originals = new List<KeyValuePair<string, string>>();
+                var csharpFiles = new List<KeyValuePair<string, string>>();
+
                 foreach (var file in EnumerateFilesCached(10))
                 {
                     var relative = Relative(file);
@@ -863,30 +881,74 @@ namespace LangCode.Workspace
                     string original;
                     try
                     {
-                        original = ReadTextCapped(file, out _);
+                        // 重命名后的落盘会做全文并发校验，这里也读完整文本，
+                        // 避免大文件因「截断后的原文 ≠ 完整当前文本」而被误判为冲突。
+                        original = ReadAllTextDetected(file);
                     }
                     catch (Exception)
                     {
                         continue;
                     }
 
-                    string next = null;
+                    // 只有文本里真的出现该名字的文件才需要解析 / 改名
+                    if (original.IndexOf(from, StringComparison.Ordinal) < 0)
+                    {
+                        continue;
+                    }
+
+                    originals.Add(new KeyValuePair<string, string>(relative, original));
                     if (RoslynCodeService.IsAvailable && RoslynCodeService.IsCSharpFile(relative))
                     {
-                        if (!RoslynCodeService.TryRename(original, from, to, out next, out _))
+                        csharpFiles.Add(new KeyValuePair<string, string>(relative, original));
+                    }
+                }
+
+                // C# 走语义模型：只改真正绑定到该符号的标识符，避免误改同名局部变量 / 成员
+                var semanticResults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                string semanticError = null;
+
+                if (csharpFiles.Count > 0)
+                {
+                    var renamed = RoslynCodeService.TryRenameAcrossFiles(csharpFiles, from, to, out semanticError, out var ambiguous);
+                    if (renamed == null && ambiguous)
+                    {
+                        error = semanticError;
+                        return null;
+                    }
+
+                    if (renamed != null)
+                    {
+                        foreach (var item in renamed)
+                        {
+                            semanticResults[item.Path] = item.NewText;
+                        }
+                    }
+                }
+
+                var nonCsharpPattern = new Regex("\\b" + Regex.Escape(from) + "\\b", RegexOptions.CultureInvariant);
+
+                foreach (var pair in originals)
+                {
+                    var relative = pair.Key;
+                    var original = pair.Value;
+                    string next;
+
+                    if (RoslynCodeService.IsAvailable && RoslynCodeService.IsCSharpFile(relative))
+                    {
+                        // 语义重命名没有找到声明 / 编译失败时，宁可不改，也不退回容易误伤的正则
+                        if (!semanticResults.TryGetValue(relative, out next))
                         {
                             continue;
                         }
                     }
                     else
                     {
-                        var pattern = new Regex("\\b" + Regex.Escape(from) + "\\b", RegexOptions.CultureInvariant);
-                        if (!pattern.IsMatch(original))
+                        if (!nonCsharpPattern.IsMatch(original))
                         {
                             continue;
                         }
 
-                        next = pattern.Replace(original, to);
+                        next = nonCsharpPattern.Replace(original, to);
                     }
 
                     if (next == null || SimpleDiff.AreEqual(original, next))
@@ -907,6 +969,13 @@ namespace LangCode.Workspace
                     {
                         break;
                     }
+                }
+
+                // 唯一候选全是 C# 且语义解析失败：把真实原因带回给模型
+                if (pendings.Count == 0 && !string.IsNullOrWhiteSpace(semanticError))
+                {
+                    error = semanticError;
+                    return null;
                 }
             }
             catch (Exception ex)
@@ -929,7 +998,7 @@ namespace LangCode.Workspace
             {
                 var full = ResolveWithinRoot(relativePath);
                 var exists = File.Exists(full);
-                var original = exists ? File.ReadAllText(full) : string.Empty;
+                var original = exists ? ReadAllTextDetected(full) : string.Empty;
                 var next = content ?? string.Empty;
 
                 if (exists && SimpleDiff.AreEqual(original, next))
@@ -970,7 +1039,7 @@ namespace LangCode.Workspace
                     return Fail("文件不存在：" + relativePath);
                 }
 
-                var original = File.ReadAllText(full);
+                var original = ReadAllTextDetected(full);
                 if (string.IsNullOrEmpty(oldText))
                 {
                     return Fail("oldText 不能为空；整文件改写请用 write_file");
@@ -1026,7 +1095,7 @@ namespace LangCode.Workspace
                     return Fail("文件不存在：" + relativePath);
                 }
 
-                var original = File.ReadAllText(full);
+                var original = ReadAllTextDetected(full);
                 if (!StructuredEditor.TryApply(original, symbol, mode, newText, out var next, out var error))
                 {
                     return Fail(error);
@@ -1115,7 +1184,38 @@ namespace LangCode.Workspace
                 // 同一路径的写入串行化（并行子任务 / 同轮多次改动同一文件时保护）
                 lock (GetWriteLock(full))
                 {
-                    WriteTextPreserving(full, edit.NewText ?? string.Empty, edit.OriginalText, edit.IsNewFile);
+                    if (edit.IsNewFile)
+                    {
+                        // 审批期间目标文件可能被别人创建：此时不能静默覆盖
+                        if (File.Exists(full))
+                        {
+                            return Fail("目标文件在审批期间已被创建，请重新读取后再试：" + edit.RelativePath);
+                        }
+
+                        WriteTextPreserving(full, edit.NewText ?? string.Empty, new UTF8Encoding(false), false, false);
+                    }
+                    else
+                    {
+                        if (!File.Exists(full))
+                        {
+                            return Fail("文件在审批期间已被删除，请重新读取后再试：" + edit.RelativePath);
+                        }
+
+                        var current = ReadAllTextDetected(full, out var encoding, out var hasBom);
+
+                        // 乐观并发校验：审批期间磁盘内容变了就拒绝写入，避免覆盖别人的改动
+                        if (!string.Equals(current, edit.OriginalText ?? string.Empty, StringComparison.Ordinal))
+                        {
+                            return Fail("文件在审批期间已被修改，请重新读取后再试：" + edit.RelativePath);
+                        }
+
+                        WriteTextPreserving(
+                            full,
+                            edit.NewText ?? string.Empty,
+                            encoding,
+                            hasBom,
+                            UsesCrLf(current));
+                    }
                 }
 
                 edit.Applied = true;
@@ -1164,8 +1264,25 @@ namespace LangCode.Workspace
                     Directory.CreateDirectory(directory);
                 }
 
-                // 还原同样按原文件的编码与换行写回，不能在这一步把编码/换行改掉
-                WriteTextPreserving(full, edit.OriginalText ?? string.Empty, edit.OriginalText, edit.IsNewFile);
+                // 还原同样按当前文件的编码与换行写回，不能在这一步把编码/换行改掉
+                Encoding currentEncoding;
+                bool currentHasBom;
+                if (File.Exists(full))
+                {
+                    ReadAllTextDetected(full, out currentEncoding, out currentHasBom);
+                }
+                else
+                {
+                    currentEncoding = new UTF8Encoding(false);
+                    currentHasBom = false;
+                }
+
+                WriteTextPreserving(
+                    full,
+                    edit.OriginalText ?? string.Empty,
+                    currentEncoding,
+                    currentHasBom,
+                    UsesCrLf(edit.OriginalText));
                 edit.Applied = false;
                 InvalidateFileCache();
                 return Ok("已还原：" + edit.RelativePath);
@@ -1237,45 +1354,106 @@ namespace LangCode.Workspace
         /// <summary>
         /// 按原文件的编码与换行风格写回，并保证写入的原子性
         /// </summary>
-        private static void WriteTextPreserving(string fullPath, string text, string originalText, bool isNewFile)
+        private static void WriteTextPreserving(
+            string fullPath,
+            string text,
+            Encoding encoding,
+            bool hasBom,
+            bool useCrLf)
         {
-            var hasBom = !isNewFile && HasUtf8Bom(fullPath);
-            var useCrLf = !isNewFile && UsesCrLf(originalText);
-
             var body = (text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
             if (useCrLf)
             {
                 body = body.Replace("\n", "\r\n");
             }
 
-            var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: hasBom);
+            var targetEncoding = encoding ?? new UTF8Encoding(hasBom);
             var temp = fullPath + ".langcode.tmp";
 
-            File.WriteAllText(temp, body, encoding);
+            try
+            {
+                File.WriteAllText(temp, body, targetEncoding);
 
-            if (File.Exists(fullPath))
-            {
-                // 原子替换：读文件的进程（含 VS 自己）不会看到「写了一半」的状态
-                File.Replace(temp, fullPath, null, ignoreMetadataErrors: true);
+                if (File.Exists(fullPath))
+                {
+                    // 原子替换：读文件的进程（含 VS 自己）不会看到「写了一半」的状态
+                    File.Replace(temp, fullPath, null, ignoreMetadataErrors: true);
+                }
+                else
+                {
+                    File.Move(temp, fullPath);
+                }
             }
-            else
+            finally
             {
-                File.Move(temp, fullPath);
+                // 替换失败时别把临时文件留在工作区里
+                try
+                {
+                    if (File.Exists(temp))
+                    {
+                        File.Delete(temp);
+                    }
+                }
+                catch (Exception)
+                {
+                    // 清理失败不影响主流程
+                }
             }
         }
 
-        private static bool HasUtf8Bom(string path)
+        /// <summary>
+        /// 读文件并识别常见 BOM 编码（UTF-8 / UTF-16 / UTF-32）。
+        /// 无 BOM 时按 UTF-8 处理，与原有行为一致。
+        /// </summary>
+        private static string ReadAllTextDetected(string path)
         {
-            try
+            return ReadAllTextDetected(path, out _, out _);
+        }
+
+        private static string ReadAllTextDetected(string path, out Encoding encoding, out bool hasBom)
+        {
+            hasBom = false;
+
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                var head = new byte[4];
+                var read = stream.Read(head, 0, head.Length);
+                stream.Position = 0;
+
+                if (read >= 4 && head[0] == 0xFF && head[1] == 0xFE && head[2] == 0x00 && head[3] == 0x00)
                 {
-                    return stream.ReadByte() == 0xEF && stream.ReadByte() == 0xBB && stream.ReadByte() == 0xBF;
+                    encoding = new UTF32Encoding(bigEndian: false, byteOrderMark: true);
+                    hasBom = true;
                 }
-            }
-            catch (Exception)
-            {
-                return false;
+                else if (read >= 4 && head[0] == 0x00 && head[1] == 0x00 && head[2] == 0xFE && head[3] == 0xFF)
+                {
+                    encoding = new UTF32Encoding(bigEndian: true, byteOrderMark: true);
+                    hasBom = true;
+                }
+                else if (read >= 3 && head[0] == 0xEF && head[1] == 0xBB && head[2] == 0xBF)
+                {
+                    encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
+                    hasBom = true;
+                }
+                else if (read >= 2 && head[0] == 0xFF && head[1] == 0xFE)
+                {
+                    encoding = new UnicodeEncoding(bigEndian: false, byteOrderMark: true);
+                    hasBom = true;
+                }
+                else if (read >= 2 && head[0] == 0xFE && head[1] == 0xFF)
+                {
+                    encoding = new UnicodeEncoding(bigEndian: true, byteOrderMark: true);
+                    hasBom = true;
+                }
+                else
+                {
+                    encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+                }
+
+                using (var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: true))
+                {
+                    return reader.ReadToEnd();
+                }
             }
         }
 
@@ -1396,21 +1574,45 @@ namespace LangCode.Workspace
 
         private static Regex GlobToRegex(string glob)
         {
+            var pattern = (glob ?? "**").Trim().Replace('\\', '/');
             var builder = new StringBuilder("^");
-            foreach (var c in glob)
+
+            for (var i = 0; i < pattern.Length; i++)
             {
-                switch (c)
+                var c = pattern[i];
+                if (c == '*')
                 {
-                    case '*':
-                        builder.Append(".*");
-                        break;
-                    case '?':
-                        builder.Append('.');
-                        break;
-                    default:
-                        builder.Append(Regex.Escape(c.ToString()));
-                        break;
+                    var doubleStar = i + 1 < pattern.Length && pattern[i + 1] == '*';
+                    if (doubleStar)
+                    {
+                        i++;
+                        if (i + 1 < pattern.Length && pattern[i + 1] == '/')
+                        {
+                            // **/ 匹配零层或多层目录：src/**/*.tsx 也能匹配 src/App.tsx
+                            i++;
+                            builder.Append("(?:.*/)?");
+                        }
+                        else
+                        {
+                            builder.Append(".*");
+                        }
+                    }
+                    else
+                    {
+                        // 单星不跨目录分隔符
+                        builder.Append("[^/]*");
+                    }
+
+                    continue;
                 }
+
+                if (c == '?')
+                {
+                    builder.Append("[^/]");
+                    continue;
+                }
+
+                builder.Append(Regex.Escape(c.ToString()));
             }
 
             builder.Append('$');

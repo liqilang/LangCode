@@ -29,6 +29,23 @@ namespace LangCode.Ui.ToolWindows
         private readonly ChatSession _session = new ChatSession();
 
         /// <summary>
+        /// 并行子任务可能同时要求审批：用信号量把审批串行化，
+        /// 避免后一个请求覆盖前一个的 TaskCompletionSource。
+        /// </summary>
+        private readonly SemaphoreSlim _approvalGate = new SemaphoreSlim(1, 1);
+
+        /// <summary>
+        /// 同上：模型提问也串行化
+        /// </summary>
+        private readonly SemaphoreSlim _questionGate = new SemaphoreSlim(1, 1);
+
+        /// <summary>
+        /// 本轮已被取消：排队中的审批 / 提问拿到信号量后直接返回，不再弹卡片。
+        /// </summary>
+        private bool _approvalCancelled;
+        private bool _questionCancelled;
+
+        /// <summary>
         /// 当前唯一在等用户拍板的任务（Agent 循环一次只会 await 一个）
         /// </summary>
         private TaskCompletionSource<bool> _pendingApproval;

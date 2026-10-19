@@ -61,7 +61,7 @@ namespace LangCode.Workspace
         /// </summary>
         private static readonly string[] ExcludedDirectories =
         {
-            ".git", ".vs", ".idea", "bin", "obj", "node_modules", "packages", "TestResults", ".next", "dist", "build",
+            ".git", ".vs", ".idea", ".langcode", "bin", "obj", "node_modules", "packages", "TestResults", ".next", "dist", "build",
         };
 
         private readonly string _shadow;
@@ -133,10 +133,10 @@ namespace LangCode.Workspace
                 }
 
                 var head = RunGit("rev-parse HEAD", withWorkTree: false);
-                var id = head.Ok ? head.Output.Trim() : string.Empty;
-                if (id.Length == 0)
+                var id = head.Ok ? SanitizeId(head.Output.Trim()) : string.Empty;
+                if (id.Length < 7)
                 {
-                    LastError = head.Output;
+                    LastError = "rev-parse HEAD 返回了非法 id：" + head.Output;
                     return null;
                 }
 

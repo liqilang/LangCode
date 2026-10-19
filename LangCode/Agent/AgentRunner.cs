@@ -106,6 +106,12 @@ namespace LangCode.Agent
         /// DTE 只能在 UI 线程访问，界面侧负责封送到 Dispatcher
         /// </summary>
         public Func<DebugCommand, CancellationToken, Task<string>> DebugControlAsync { get; set; }
+
+        /// <summary>
+        /// 文件是否在 VS 编辑器里有未保存改动。返回 true 时拒绝直接写盘，
+        /// 避免 AI 的磁盘写入与用户未保存的缓冲区互相覆盖。
+        /// </summary>
+        public Func<string, bool> IsFileDirty { get; set; }
     }
 
     /// <summary>
@@ -131,6 +137,17 @@ namespace LangCode.Agent
             "请立刻动手：直接输出 ```action 代码块来调用工具（read_file / write_file / replace_in_file / edit_symbol / run_command 等），\n" +
             "不要复述计划、也不必征求同意。需要多个互不依赖的动作时，请在同一轮里一起发出\n" +
             "如果确实已经全部完成、无需再调用任何工具，就直接给出最终结论。";
+
+        /// <summary>
+        /// 动作块存在但 JSON 解析失败时的续跑提示。
+        /// 典型场景：把含 Markdown 代码块的长文本塞进 new_task / write_file 的字符串参数。
+        /// </summary>
+        private const string MalformedActionNudgePrompt =
+            "你上一条包含 action 代码块，但系统没有解析出任何工具调用。常见原因是动作 JSON 不合法：\n" +
+            "1) 字符串里的换行必须写成 \\n，不能直接换行；\n" +
+            "2) 字符串里出现三反引号时写成 \\u0060\\u0060\\u0060；\n" +
+            "3) 如果 task/content 很长且包含 Markdown 代码块，优先改用 apply_patch，或把整段内容作为正确转义的 JSON 字符串。\n" +
+            "请直接重发合法的 action 块，不要只解释。";
 
         /// <summary>
         /// 判断模型是不是「只说要干、却没干」：短文本里出现第一人称的行动预告。
@@ -428,6 +445,18 @@ namespace LangCode.Agent
                 if (actions.Count == 0)
                 {
                     ChatDiagnostics.Log("本轮模型输出未含任何动作：" + raw);
+
+                    // 动作围栏存在但解析失败：不能当成「任务完成」直接收尾，
+                    // 否则用户看到的就是「任务没跑完就自动结束」。
+                    if (ToolProtocol.ContainsActionFence(raw) && actionNudges < MaxActionNudges)
+                    {
+                        actionNudges++;
+                        ChatDiagnostics.Log("检测到 action 围栏但解析失败，注入第 " + actionNudges + " 次修复提示");
+                        callbacks.OnNotice?.Invoke("检测到动作块但解析失败（通常是 JSON 字符串里有未转义的换行或三反引号），已自动提示模型重发");
+                        history.Add(new ChatTurn("assistant", raw));
+                        history.Add(new ChatTurn("user", MalformedActionNudgePrompt));
+                        continue;
+                    }
 
                     // 模型给出最终答复若本轮改过文件、且「自动验证 / 自动修复」还有活要干，
                     // 就把后续请求注入历史继续跑，而不是就此收尾 —— 这是「改完还能跑通」的关键
@@ -735,52 +764,72 @@ namespace LangCode.Agent
                 return assistantText;
             }
 
+            // 与解析共用同一套范围识别：结束围栏可以内联在 JSON 后面，也可以独占一行
+            var blocks = ToolProtocol.FindActionBlocks(assistantText);
+            if (blocks.Count == 0)
+            {
+                return assistantText;
+            }
+
             var builder = new StringBuilder(assistantText.Length);
             var cursor = 0;
 
-            while (cursor < assistantText.Length)
+            foreach (var block in blocks)
             {
-                var fence = assistantText.IndexOf(ActionFence, cursor, StringComparison.Ordinal);
-                if (fence < 0)
+                if (block.Start < cursor)
                 {
-                    builder.Append(assistantText, cursor, assistantText.Length - cursor);
-                    break;
-                }
-
-                // 围栏到行尾之间是语言标注；正文从下一行开始（与 ToolProtocol 的围栏协议一致）
-                var lineEnd = assistantText.IndexOf('\n', fence);
-                if (lineEnd < 0)
-                {
-                    builder.Append(assistantText, cursor, assistantText.Length - cursor);
-                    break;
-                }
-
-                var language = assistantText
-                    .Substring(fence + ActionFence.Length, lineEnd - fence - ActionFence.Length)
-                    .Trim();
-
-                if (!string.Equals(language, "action", StringComparison.OrdinalIgnoreCase))
-                {
-                    // 不是动作块（普通代码块）：整行原样搬走，继续往后扫
-                    builder.Append(assistantText, cursor, lineEnd + 1 - cursor);
-                    cursor = lineEnd + 1;
                     continue;
                 }
 
-                var bodyEnd = assistantText.IndexOf(ActionFence, lineEnd + 1, StringComparison.Ordinal);
-                if (bodyEnd < 0)
+                // 开头围栏 + 语言标注原样搬走
+                builder.Append(assistantText, cursor, block.BodyStart - cursor);
+
+                if (!block.IsClosed)
                 {
-                    builder.Append(assistantText, cursor, assistantText.Length - cursor);
+                    // 尚未闭合：原样保留，绝不破坏正在生成的动作
+                    builder.Append(assistantText, block.BodyStart, assistantText.Length - block.BodyStart);
+                    cursor = assistantText.Length;
                     break;
                 }
 
-                // 围栏行 + 折叠后的正文；结束围栏留给下一轮循环原样搬走
-                builder.Append(assistantText, cursor, lineEnd + 1 - cursor);
-                builder.Append(FoldActionBody(assistantText.Substring(lineEnd + 1, bodyEnd - lineEnd - 1), threshold));
-                cursor = bodyEnd;
+                var body = assistantText.Substring(block.BodyStart, block.BodyEnd - block.BodyStart);
+                builder.Append(FoldActionBodyKeepingWhitespace(body, threshold));
+                cursor = block.BodyEnd;
+            }
+
+            if (cursor < assistantText.Length)
+            {
+                builder.Append(assistantText, cursor, assistantText.Length - cursor);
             }
 
             return builder.ToString();
+        }
+
+        /// <summary>
+        /// 折叠动作正文，但保留首尾空白（尤其是动作块开头那个换行）
+        /// </summary>
+        private static string FoldActionBodyKeepingWhitespace(string body, int threshold)
+        {
+            var lead = 0;
+            while (lead < body.Length && char.IsWhiteSpace(body[lead]))
+            {
+                lead++;
+            }
+
+            var tail = body.Length;
+            while (tail > lead && char.IsWhiteSpace(body[tail - 1]))
+            {
+                tail--;
+            }
+
+            if (lead == 0 && tail == body.Length)
+            {
+                return FoldActionBody(body, threshold);
+            }
+
+            return body.Substring(0, lead) +
+                   FoldActionBody(body.Substring(lead, tail - lead), threshold) +
+                   body.Substring(tail);
         }
 
         /// <summary>
@@ -827,6 +876,12 @@ namespace LangCode.Agent
         /// </summary>
         private ToolResult Apply(PendingEdit pending, AgentCallbacks callbacks)
         {
+            var blocked = CheckFileDirty(pending, callbacks);
+            if (blocked != null)
+            {
+                return blocked;
+            }
+
             var result = _workspace.Apply(pending);
 
             if (result.Ok)
@@ -840,6 +895,28 @@ namespace LangCode.Agent
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 统一检查「编辑器里是否有未保存改动」。所有落盘路径（单文件 / 补丁 / 重命名）都必须先过这一关。
+        /// </summary>
+        private static ToolResult CheckFileDirty(PendingEdit pending, AgentCallbacks callbacks)
+        {
+            if (pending == null || callbacks?.IsFileDirty == null)
+            {
+                return null;
+            }
+
+            if (!callbacks.IsFileDirty(pending.RelativePath))
+            {
+                return null;
+            }
+
+            return new ToolResult
+            {
+                Ok = false,
+                Output = "文件在 Visual Studio 编辑器中还有未保存的改动，已拒绝直接写盘。" + "请先保存（Ctrl+S）后再让我重试；这样不会覆盖你正在编辑的内容：" + pending.RelativePath,
+            };
         }
 
     }

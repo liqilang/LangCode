@@ -50,10 +50,10 @@ namespace LangCode.Agent
                     {
                         var command = action.Get("command");
                         var directory = action.Get("working_directory");
-                        var result = _commands.Run(command, directory, callbacks.OnCommandOutput);
+                        var result = await _commands.RunAsync(command, directory, callbacks.OnCommandOutput, cancellationToken).ConfigureAwait(false);
 
                         // 确认卡上显示的那一行要能对上实际执行的命令
-                        result.Output = "命令：" + _commands.Describe(command, directory) + "\n\n" + result.Output;
+                        result.Output = "命令：" + _commands.Describe(command, directory) + "\n\n" + result.Output + FormatExitCode(result);
                         return result;
                     }
 
@@ -70,7 +70,7 @@ namespace LangCode.Agent
                         }
 
                         testCommand = ApplyTestFilter(testCommand, action.Get("filter"));
-                        return RunTestsWithReport(testCommand, callbacks);
+                        return await RunTestsWithReportAsync(testCommand, callbacks, cancellationToken).ConfigureAwait(false);
                     }
 
                 case "debug_inspect":
@@ -121,12 +121,12 @@ namespace LangCode.Agent
         /// 运行测试；<c>dotnet test</c> 时附带 TRX 记录器并把报告解析成结构化汇总
         /// （通过 / 失败计数 + 失败用例与堆栈），让自动修复有的放矢
         /// </summary>
-        private ToolResult RunTestsWithReport(string testCommand, AgentCallbacks callbacks)
+        private async Task<ToolResult> RunTestsWithReportAsync(string testCommand, AgentCallbacks callbacks, CancellationToken cancellationToken)
         {
             if (!VsTestRunner.IsDotnetTest(testCommand))
             {
-                var plain = _commands.Run(testCommand, string.Empty, callbacks.OnCommandOutput);
-                plain.Output = "测试命令：" + _commands.Describe(testCommand, string.Empty) + "\n\n" + plain.Output;
+                var plain = await _commands.RunAsync(testCommand, string.Empty, callbacks.OnCommandOutput, cancellationToken).ConfigureAwait(false);
+                plain.Output = "测试命令：" + _commands.Describe(testCommand, string.Empty) + "\n\n" + plain.Output + FormatExitCode(plain);
                 return plain;
             }
 
@@ -145,13 +145,14 @@ namespace LangCode.Agent
                               " --logger \"trx;LogFileName=langcode-results.trx\"" +
                               " --results-directory \"" + resultsDir + "\"";
 
-            var result = _commands.Run(fullCommand, string.Empty, callbacks.OnCommandOutput);
+            var result = await _commands.RunAsync(fullCommand, string.Empty, callbacks.OnCommandOutput, cancellationToken).ConfigureAwait(false);
 
             var report = VsTestRunner.ParseTrx(trxPath);
             var summary = VsTestRunner.Describe(report);
 
             result.Output = "测试命令：" + _commands.Describe(testCommand, string.Empty) + "\n\n" +
-                            summary + "\n\n---- 原始输出（尾部） ----\n" + result.Output;
+                            summary + "\n\n---- 原始输出（尾部） ----\n" + result.Output +
+                            FormatExitCode(result);
 
             if (report.HasResults && report.Failed > 0)
             {
@@ -159,6 +160,19 @@ namespace LangCode.Agent
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 把退出码作为独立一行附在工具输出末尾（输出本体保持干净，便于解析）
+        /// </summary>
+        private static string FormatExitCode(ToolResult result)
+        {
+            if (result == null || result.Canceled || result.ExitCode < 0)
+            {
+                return string.Empty;
+            }
+
+            return "\n（退出码 " + result.ExitCode + "）";
         }
 
         /// <summary>

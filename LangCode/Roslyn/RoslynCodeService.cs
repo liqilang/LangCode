@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
@@ -73,6 +74,16 @@ namespace LangCode.Roslyn
         /// 该引用是否是声明处（而不是使用处）
         /// </summary>
         public bool IsDeclaration;
+    }
+
+    /// <summary>
+    /// 语义重命名后的单个文件结果
+    /// </summary>
+    public sealed class SemanticRenameFile
+    {
+        public string Path = string.Empty;
+        public string NewText = string.Empty;
+        public int Count;
     }
 
     /// <summary>
@@ -326,6 +337,262 @@ namespace LangCode.Roslyn
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 语义级跨文件重命名：先在所有候选文件里找到唯一的目标符号，
+        /// 再只改真正绑定到该符号的标识符。找不到唯一声明或编译环境不可用时返回 null。
+        /// </summary>
+        /// <param name="ambiguous">true 表示同名符号有多个，调用方应直接报错而不是退回文本替换</param>
+        public static IList<SemanticRenameFile> TryRenameAcrossFiles(
+            IList<KeyValuePair<string, string>> files,
+            string oldName,
+            string newName,
+            out string error,
+            out bool ambiguous)
+        {
+            error = null;
+            ambiguous = false;
+
+            var from = (oldName ?? string.Empty).Trim();
+            var to = (newName ?? string.Empty).Trim();
+            if (from.Length == 0 || to.Length == 0)
+            {
+                error = "symbol 与 new_name 都不能为空";
+                return null;
+            }
+
+            if (files == null || files.Count == 0)
+            {
+                error = "没有可参与语义重命名的文件";
+                return null;
+            }
+
+            try
+            {
+                var trees = new List<SyntaxTree>(files.Count);
+                foreach (var file in files)
+                {
+                    trees.Add(CSharpSyntaxTree.ParseText(file.Value ?? string.Empty, path: file.Key));
+                }
+
+                var compilation = CSharpCompilation.Create(
+                    "LangCodeSemanticRename",
+                    trees,
+                    DefaultMetadataReferences.Value,
+                    new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+                var models = new Dictionary<SyntaxTree, SemanticModel>();
+                var symbols = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+
+                foreach (var tree in trees)
+                {
+                    var model = compilation.GetSemanticModel(tree);
+                    models[tree] = model;
+
+                    foreach (var node in tree.GetRoot().DescendantNodes())
+                    {
+                        ISymbol declared;
+                        switch (node)
+                        {
+                            case BaseTypeDeclarationSyntax type:
+                                declared = model.GetDeclaredSymbol(type);
+                                break;
+                            case MethodDeclarationSyntax method:
+                                declared = model.GetDeclaredSymbol(method);
+                                break;
+                            case PropertyDeclarationSyntax property:
+                                declared = model.GetDeclaredSymbol(property);
+                                break;
+                            case EventDeclarationSyntax @event:
+                                declared = model.GetDeclaredSymbol(@event);
+                                break;
+                            case DelegateDeclarationSyntax @delegate:
+                                declared = model.GetDeclaredSymbol(@delegate);
+                                break;
+                            case EnumMemberDeclarationSyntax enumMember:
+                                declared = model.GetDeclaredSymbol(enumMember);
+                                break;
+                            case LocalFunctionStatementSyntax localFunction:
+                                declared = model.GetDeclaredSymbol(localFunction);
+                                break;
+                            case TypeParameterSyntax typeParameter:
+                                declared = model.GetDeclaredSymbol(typeParameter);
+                                break;
+                            case VariableDeclaratorSyntax variable:
+                                declared = model.GetDeclaredSymbol(variable);
+                                break;
+                            case ParameterSyntax parameter:
+                                declared = model.GetDeclaredSymbol(parameter);
+                                break;
+                            default:
+                                declared = null;
+                                break;
+                        }
+
+                        if (declared != null && string.Equals(declared.Name, from, StringComparison.Ordinal))
+                        {
+                            symbols.Add(declared);
+                        }
+                    }
+                }
+
+                if (symbols.Count == 0)
+                {
+                    error = "没有找到名为 " + from + " 的符号声明（可能只在字符串 / 注释里出现，或来自外部程序集）";
+                    return null;
+                }
+
+                if (symbols.Count > 1)
+                {
+                    ambiguous = true;
+                    error = "工作区里存在多个名为 " + from + " 的符号（" +
+                            string.Join("、", symbols.Select(s => s.Kind + " " + s.ToDisplayString()).Take(5)) +
+                            "）。为避免误改，语义重命名已取消；请使用 replace_in_file 或提供更精确的上下文。";
+                    return null;
+                }
+
+                var target = symbols.First();
+                var results = new List<SemanticRenameFile>();
+
+                foreach (var tree in trees)
+                {
+                    var model = models[tree];
+                    var root = tree.GetRoot();
+                    var tokens = new List<SyntaxToken>();
+
+                    foreach (var token in root.DescendantTokens())
+                    {
+                        if (!token.IsKind(SyntaxKind.IdentifierToken) ||
+                            !string.Equals(token.ValueText, from, StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        if (RefersToSymbol(token, model, target))
+                        {
+                            tokens.Add(token);
+                        }
+                    }
+
+                    if (tokens.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var identifier = SyntaxFactory.Identifier(to);
+                    var newRoot = root.ReplaceTokens(tokens, (original, _) => identifier.WithTriviaFrom(original));
+                    results.Add(new SemanticRenameFile
+                    {
+                        Path = tree.FilePath,
+                        NewText = newRoot.ToFullString(),
+                        Count = tokens.Count,
+                    });
+                }
+
+                return results;
+            }
+            catch (Exception ex)
+            {
+                error = "语义重命名失败：" + ex.Message;
+                return null;
+            }
+        }
+
+        private static bool RefersToSymbol(SyntaxToken token, SemanticModel model, ISymbol target)
+        {
+            var node = token.Parent;
+            if (node == null)
+            {
+                return false;
+            }
+
+            switch (node)
+            {
+                case BaseTypeDeclarationSyntax type when type.Identifier == token:
+                    return SameSymbol(model.GetDeclaredSymbol(type), target);
+                case MethodDeclarationSyntax method when method.Identifier == token:
+                    return SameSymbol(model.GetDeclaredSymbol(method), target);
+                case PropertyDeclarationSyntax property when property.Identifier == token:
+                    return SameSymbol(model.GetDeclaredSymbol(property), target);
+                case EventDeclarationSyntax @event when @event.Identifier == token:
+                    return SameSymbol(model.GetDeclaredSymbol(@event), target);
+                case DelegateDeclarationSyntax @delegate when @delegate.Identifier == token:
+                    return SameSymbol(model.GetDeclaredSymbol(@delegate), target);
+                case EnumMemberDeclarationSyntax enumMember when enumMember.Identifier == token:
+                    return SameSymbol(model.GetDeclaredSymbol(enumMember), target);
+                case LocalFunctionStatementSyntax localFunction when localFunction.Identifier == token:
+                    return SameSymbol(model.GetDeclaredSymbol(localFunction), target);
+                case TypeParameterSyntax typeParameter when typeParameter.Identifier == token:
+                    return SameSymbol(model.GetDeclaredSymbol(typeParameter), target);
+                case VariableDeclaratorSyntax variable when variable.Identifier == token:
+                    return SameSymbol(model.GetDeclaredSymbol(variable), target);
+                case ParameterSyntax parameter when parameter.Identifier == token:
+                    return SameSymbol(model.GetDeclaredSymbol(parameter), target);
+                case ConstructorDeclarationSyntax constructor when constructor.Identifier == token:
+                    return SameSymbol(model.GetDeclaredSymbol(constructor)?.ContainingType, target);
+            }
+
+            var info = model.GetSymbolInfo(node);
+            if (SameSymbol(info.Symbol, target))
+            {
+                return true;
+            }
+
+            foreach (var candidate in info.CandidateSymbols)
+            {
+                if (SameSymbol(candidate, target))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool SameSymbol(ISymbol left, ISymbol right)
+        {
+            if (left == null || right == null)
+            {
+                return false;
+            }
+
+            return SymbolEqualityComparer.Default.Equals(left, right) ||
+                   SymbolEqualityComparer.Default.Equals(left.OriginalDefinition, right.OriginalDefinition);
+        }
+
+        /// <summary>
+        /// 语义分析需要的基础元数据引用（不依赖用户具体项目的 MSBuild 引用）
+        /// </summary>
+        private static readonly Lazy<IList<MetadataReference>> DefaultMetadataReferences =
+            new Lazy<IList<MetadataReference>>(CreateDefaultReferences, isThreadSafe: true);
+
+        private static IList<MetadataReference> CreateDefaultReferences()
+        {
+            var paths = new List<string>
+            {
+                typeof(object).Assembly.Location,
+                typeof(Enumerable).Assembly.Location,
+                typeof(System.Runtime.Serialization.DataContractAttribute).Assembly.Location,
+                typeof(System.ComponentModel.INotifyPropertyChanged).Assembly.Location,
+                typeof(System.Net.Http.HttpClient).Assembly.Location,
+                typeof(System.Xml.XmlDocument).Assembly.Location,
+            };
+
+            var references = new List<MetadataReference>();
+            foreach (var path in paths.Where(p => !string.IsNullOrEmpty(p) && File.Exists(p)).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    references.Add(MetadataReference.CreateFromFile(path));
+                }
+                catch (Exception)
+                {
+                    // 单个引用失败不影响其它引用
+                }
+            }
+
+            return references;
         }
 
         // ==================== 内部辅助 ====================

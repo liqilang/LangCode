@@ -54,12 +54,7 @@ namespace LangCode.Persistence
     }
 
     /// <summary>
-    /// 用量 / 费用统计的落盘与聚合。
-    /// <para>
-    /// 存储改为<b>追加式 NDJSON</b>（<c>%APPDATA%\LangCode\vsext\usage.jsonl</c>，一行一条采样）：
-    /// 每次记账只追加一行，不再把整个数组重新序列化一遍 —— 高频记账（多步任务、流式）下省掉大量写放大。
-    /// 仅在超过 <see cref="MaxSamples"/> 需要裁剪、或 <see cref="Clear"/> 时才整体重写。
-    /// 旧的 <c>usage.json</c> 会在首次访问时自动迁移（原文件改名 <c>.migrated</c> 备份）。
+    /// 用量 / 费用统计的落盘与聚合 
     /// </para>
     /// </summary>
     public static class UsageStore
@@ -69,8 +64,14 @@ namespace LangCode.Persistence
         /// </summary>
         private const int MaxSamples = 20000;
 
+        /// <summary>
+        /// 达到上限后再多留一批才裁剪：避免刚好卡在 20000 时每次记账都整体重写文件。
+        /// </summary>
+        private const int TrimBatch = 1000;
+
         private static readonly object Gate = new object();
         private static List<StoredUsage> _cache;
+        private static UsageTotals _totalCache;
         private static bool _migrated;
 
         /// <summary>NDJSON 存储路径</summary>
@@ -132,9 +133,9 @@ namespace LangCode.Persistence
                 samples = new List<StoredUsage>(samples);
                 samples.Add(sample);
 
-                if (samples.Count > MaxSamples)
+                if (samples.Count > MaxSamples + TrimBatch)
                 {
-                    // 超限才整体重写一次（裁掉最旧的）
+                    // 超出一批才整体重写一次（裁掉最旧的）
                     samples = samples.OrderByDescending(s => s.AtUtc).Take(MaxSamples).OrderBy(s => s.AtUtc).ToList();
                     _cache = samples;
                     WriteAllLocked(_cache);
@@ -144,6 +145,7 @@ namespace LangCode.Persistence
                     // 常规路径：内存追加 + 磁盘追加一行（不全量重写）
                     _cache = samples;
                     AppendLocked(sample);
+                    _totalCache?.Add(sample.InputTokens, sample.OutputTokens, sample.CostUsd, sample.CachedTokens);
                 }
             }
 
@@ -157,6 +159,7 @@ namespace LangCode.Persistence
                 EnsureMigratedLocked();
 
                 _cache = [];
+                _totalCache = null;
 
                 try
                 {
@@ -179,7 +182,17 @@ namespace LangCode.Persistence
         /// </summary>
         public static UsageTotals Total()
         {
-            return Summarize(LoadAll());
+            lock (Gate)
+            {
+                EnsureMigratedLocked();
+
+                if (_cache == null)
+                {
+                    _cache = ReadFromDiskLocked();
+                }
+
+                return _totalCache ??= Summarize(_cache);
+            }
         }
 
         /// <summary>
@@ -323,6 +336,8 @@ namespace LangCode.Persistence
         /// </summary>
         private static void WriteAllLocked(List<StoredUsage> samples)
         {
+            _totalCache = null;
+
             try
             {
                 System.IO.Directory.CreateDirectory(SettingsStore.Directory);

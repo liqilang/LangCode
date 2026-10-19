@@ -353,11 +353,14 @@ namespace LangCode.Chat
                             }
 
                         case "message_stop":
-                            return;
+                            // 只结束读取循环；工具块翻译与 usage 上报在循环之后，
+                            // 这里不能 return，否则 Anthropic 原生工具永远不会执行。
+                            goto endStream;
                     }
                 }
             }
 
+        endStream:
             // 流结束后：把 tool_use 内容块翻译成 ```action 文本块（复用文本动作协议）
             if (toolBlocks.Count > 0)
             {

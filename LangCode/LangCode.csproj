@@ -65,8 +65,10 @@
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
 
-  <ItemGroup> 
+  <ItemGroup>
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.Net.Http" />
-  </ItemGroup> 
+    <!-- DPAPI（ProtectedData）用于加密落盘的 API Key -->
+    <Reference Include="System.Security" />
+  </ItemGroup>
 </Project>

@@ -306,7 +306,7 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private Task<string> AskUserAsync(ChatMessage message, AgentQuestion question)
         {
-            return Dispatcher.InvokeAsync(() =>
+            return Dispatcher.InvokeAsync(async () =>
             {
                 var card = new ChatBlock
                 {
@@ -314,17 +314,38 @@ namespace LangCode.Ui.ToolWindows
                     Title = "等待你的回答",
                     Text = question?.Question ?? string.Empty,
                     Options = question?.Options ?? [],
-                    IsPendingQuestion = true
+
+                    // 先不点亮选项：并行子任务可能同时提问，等拿到信号量后再成为「当前问题」
+                    IsPendingQuestion = false
                 };
                 message?.Blocks.Add(card);
 
-                _pendingQuestionCard = card;
-                _pendingQuestion = new TaskCompletionSource<string>();
+                await _questionGate.WaitAsync().ConfigureAwait(true);
+                try
+                {
+                    if (_questionCancelled)
+                    {
+                        card.IsPendingQuestion = false;
+                        card.IsAnswered = true;
+                        card.AnswerIsSkipped = true;
+                        card.AnswerText = "已取消";
+                        card.StatusText = "已取消";
+                        return string.Empty;
+                    }
 
-                RefreshRequestBar();
-                ScrollToEnd();
+                    _pendingQuestionCard = card;
+                    _pendingQuestion = new TaskCompletionSource<string>();
+                    card.IsPendingQuestion = true;
 
-                return _pendingQuestion.Task;
+                    RefreshRequestBar();
+                    ScrollToEnd();
+
+                    return await _pendingQuestion.Task.ConfigureAwait(true);
+                }
+                finally
+                {
+                    _questionGate.Release();
+                }
             }).Task.Unwrap();
         }
 
@@ -378,6 +399,8 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void CancelPendingQuestion(string status)
         {
+            _questionCancelled = true;
+
             var pending = _pendingQuestion;
             var card = _pendingQuestionCard;
 

@@ -919,6 +919,9 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void CancelPendingApprovals(string status)
         {
+            // 排队中的审批拿到信号量后也要立刻退出，不能在本轮取消后又弹出一张
+            _approvalCancelled = true;
+
             var pending = _pendingApproval;
             var card = _pendingCard;
 

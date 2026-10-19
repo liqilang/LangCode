@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace LangCode.Persistence
@@ -13,6 +14,16 @@ namespace LangCode.Persistence
     public static class SettingsStore
     {
         private static readonly object Gate = new object();
+
+        /// <summary>
+        /// 最近一次读 / 写失败的原因（成功时为空）
+        /// </summary>
+        public static string LastError { get; private set; } = string.Empty;
+
+        /// <summary>
+        /// DPAPI 加密后的字符串前缀，用来区分旧的明文配置
+        /// </summary>
+        private const string DpapiPrefix = "dpapi:";
 
         /// <summary>
         /// 配置目录：<c>%APPDATA%\LangCode\vsext</c> 
@@ -31,6 +42,8 @@ namespace LangCode.Persistence
         {
             lock (Gate)
             {
+                LastError = string.Empty;
+
                 try
                 {
                     if (!File.Exists(FilePath))
@@ -43,12 +56,20 @@ namespace LangCode.Persistence
                     using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(json)))
                     {
                         var settings = serializer.ReadObject(stream) as AppSettings;
-                        return settings ?? CreateDefault();
+                        if (settings == null)
+                        {
+                            return CreateDefault();
+                        }
+
+                        // 旧版本设置可能缺字段：必须先 Normalize，再用默认值补齐；
+                        // 同时把旧文件里的明文 Key 透明解密（新写入会自动加密）。
+                        return UnprotectSecrets(settings).Normalize();
                     }
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
                     // 损坏 / 无权限：不抛，回退默认值（调用方可自行提示）
+                    LastError = "读取设置失败：" + ex.Message;
                     return CreateDefault();
                 }
             }
@@ -66,24 +87,174 @@ namespace LangCode.Persistence
 
             lock (Gate)
             {
+                LastError = string.Empty;
+
                 try
                 {
                     System.IO.Directory.CreateDirectory(Directory);
 
+                    // 只在序列化副本上加密，不修改调用方正在编辑的对象
+                    var payload = Serialize(ProtectSecrets(settings.Clone()));
                     var temp = FilePath + ".tmp";
-                    File.WriteAllText(temp, Serialize(settings), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                    File.WriteAllText(temp, payload, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
                     if (File.Exists(FilePath))
                     {
-                        File.Delete(FilePath);
+                        // 原子替换：避免「先删后移」在崩溃窗口里把设置文件弄丢
+                        File.Replace(temp, FilePath, null, ignoreMetadataErrors: true);
                     }
-
-                    File.Move(temp, FilePath);
+                    else
+                    {
+                        File.Move(temp, FilePath);
+                    }
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    // 写失败不阻断交互（例如 %APPDATA% 只读）
+                    // 写失败不阻断交互（例如 %APPDATA% 只读），但把原因留给界面
+                    LastError = "保存设置失败：" + ex.Message;
+                    try
+                    {
+                        var temp = FilePath + ".tmp";
+                        if (File.Exists(temp))
+                        {
+                            File.Delete(temp);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // 清理失败忽略
+                    }
                 }
+            }
+        }
+
+        /// <summary>
+        /// 用 Windows DPAPI 加密当前用户的 API Key（只保护落盘文件，不影响内存中的对象）
+        /// </summary>
+        private static AppSettings ProtectSecrets(AppSettings settings)
+        {
+            if (settings == null)
+            {
+                return null;
+            }
+
+            settings.ApiKey = ProtectSecret(settings.ApiKey);
+
+            foreach (var profile in settings.Profiles ?? [])
+            {
+                if (profile != null)
+                {
+                    profile.ApiKey = ProtectSecret(profile.ApiKey);
+                }
+            }
+
+            foreach (var profile in settings.NamedProfiles ?? [])
+            {
+                if (profile != null)
+                {
+                    profile.ApiKey = ProtectSecret(profile.ApiKey);
+                }
+            }
+
+            foreach (var server in settings.McpServers ?? [])
+            {
+                if (server?.Environment == null)
+                {
+                    continue;
+                }
+
+                foreach (var key in new System.Collections.Generic.List<string>(server.Environment.Keys))
+                {
+                    server.Environment[key] = ProtectSecret(server.Environment[key]);
+                }
+            }
+
+            return settings;
+        }
+
+        /// <summary>
+        /// 解密旧文件 / 新文件里的 DPAPI 字段；明文值原样返回
+        /// </summary>
+        private static AppSettings UnprotectSecrets(AppSettings settings)
+        {
+            if (settings == null)
+            {
+                return null;
+            }
+
+            settings.ApiKey = UnprotectSecret(settings.ApiKey);
+
+            foreach (var profile in settings.Profiles ?? [])
+            {
+                if (profile != null)
+                {
+                    profile.ApiKey = UnprotectSecret(profile.ApiKey);
+                }
+            }
+
+            foreach (var profile in settings.NamedProfiles ?? [])
+            {
+                if (profile != null)
+                {
+                    profile.ApiKey = UnprotectSecret(profile.ApiKey);
+                }
+            }
+
+            foreach (var server in settings.McpServers ?? [])
+            {
+                if (server?.Environment == null)
+                {
+                    continue;
+                }
+
+                foreach (var key in new System.Collections.Generic.List<string>(server.Environment.Keys))
+                {
+                    server.Environment[key] = UnprotectSecret(server.Environment[key]);
+                }
+            }
+
+            return settings;
+        }
+
+        private static string ProtectSecret(string value)
+        {
+            if (string.IsNullOrEmpty(value) || value.StartsWith(DpapiPrefix, StringComparison.Ordinal))
+            {
+                return value;
+            }
+
+            try
+            {
+                var protectedBytes = ProtectedData.Protect(
+                    Encoding.UTF8.GetBytes(value),
+                    null,
+                    DataProtectionScope.CurrentUser);
+                return DpapiPrefix + Convert.ToBase64String(protectedBytes);
+            }
+            catch (Exception)
+            {
+                // DPAPI 不可用（极少数环境）：退回明文，至少不丢配置
+                return value;
+            }
+        }
+
+        private static string UnprotectSecret(string value)
+        {
+            if (string.IsNullOrEmpty(value) || !value.StartsWith(DpapiPrefix, StringComparison.Ordinal))
+            {
+                return value;
+            }
+
+            try
+            {
+                var bytes = Convert.FromBase64String(value.Substring(DpapiPrefix.Length));
+                var plain = ProtectedData.Unprotect(bytes, null, DataProtectionScope.CurrentUser);
+                return Encoding.UTF8.GetString(plain);
+            }
+            catch (Exception)
+            {
+                // 换机器 / 用户后 DPAPI 解不开：当作没有配置 Key，提示用户重新填写
+                return string.Empty;
             }
         }
 
@@ -150,7 +321,8 @@ namespace LangCode.Persistence
                         return null;
                     }
 
-                    return settings.Normalize();
+                    // 如果导入的是新版本导出的加密配置，这里同样透明解密
+                    return UnprotectSecrets(settings).Normalize();
                 }
             }
             catch (Exception ex)

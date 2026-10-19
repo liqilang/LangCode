@@ -2,6 +2,8 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace LangCode.Workspace
 {
@@ -70,7 +72,7 @@ namespace LangCode.Workspace
         /// 每产出一行输出就回调一次（可在后台线程触发，界面侧自行切线程）
         /// 长命令的界面因此能实时滚出进度，而不是干等到结束才知道它在动
         /// </param>
-        public ToolResult Run(string command, string workingDirectory, Action<string> onOutput = null)
+        public ToolResult Run(string command, string workingDirectory, Action<string> onOutput = null, CancellationToken cancellationToken = default)
         {
             var text = (command ?? string.Empty).Trim();
             if (text.Length == 0)
@@ -89,12 +91,30 @@ namespace LangCode.Workspace
 
             try
             {
-                return Execute(text, directory, onOutput);
+                return Execute(text, directory, onOutput, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return new ToolResult
+                {
+                    Ok = false,
+                    Canceled = true,
+                    ExitCode = -1,
+                    Output = "命令已取消",
+                };
             }
             catch (Exception ex)
             {
                 return Failure("执行失败：" + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// 异步执行命令（在线程池里跑同步的进程等待，便于调用方 await / 取消）
+        /// </summary>
+        public Task<ToolResult> RunAsync(string command, string workingDirectory, Action<string> onOutput, CancellationToken cancellationToken)
+        {
+            return Task.Run(() => Run(command, workingDirectory, onOutput, cancellationToken), cancellationToken);
         }
 
         /// <summary>
@@ -125,7 +145,7 @@ namespace LangCode.Workspace
             return TimeoutSeconds;
         }
 
-        private ToolResult Execute(string command, string directory, Action<string> onOutput)
+        private ToolResult Execute(string command, string directory, Action<string> onOutput, CancellationToken cancellationToken)
         {
             // chcp 65001：把控制台切到 UTF-8，中文输出才不会变成乱码
             var wrapped = "chcp 65001>nul & " + command;
@@ -188,19 +208,35 @@ namespace LangCode.Workspace
                     process.BeginOutputReadLine();
                     process.BeginErrorReadLine();
 
-                    var finished = process.WaitForExit(timeout * 1000);
-                    var exitCode = 0;
+                    var finished = false;
+                    var exitCode = -1;
 
-                    if (finished)
+                    // 取消 / 超时都要杀掉整棵进程树：只杀 cmd.exe 会留下 node / dotnet / MSBuild
+                    using (cancellationToken.Register(() => TryKillTree(process)))
                     {
-                        // 必须再等一次：让异步读取把缓冲里的最后几行冲出来
-                        process.WaitForExit();
-                        exitCode = process.ExitCode;
+                        finished = process.WaitForExit(timeout * 1000);
+
+                        if (finished)
+                        {
+                            // 给异步读取留一点时间把缓冲里的最后几行冲出来。
+                            // 这里不能无限等待：子进程可能继承了 stdout 句柄并存活更久。
+                            process.WaitForExit(2000);
+                            try
+                            {
+                                exitCode = process.ExitCode;
+                            }
+                            catch (Exception)
+                            {
+                                exitCode = -1;
+                            }
+                        }
+                        else
+                        {
+                            TryKillTree(process);
+                        }
                     }
-                    else
-                    {
-                        TryKill(process);
-                    }
+
+                    var canceled = cancellationToken.IsCancellationRequested;
 
                     string stdout;
                     string stderr;
@@ -228,11 +264,24 @@ namespace LangCode.Workspace
 
                     var result = Truncate(body.ToString());
 
+                    if (canceled)
+                    {
+                        return new ToolResult
+                        {
+                            Ok = false,
+                            Canceled = true,
+                            ExitCode = -1,
+                            Output = "命令已取消，进程树已终止" +
+                                     (result.Length == 0 ? string.Empty : "\n" + result),
+                        };
+                    }
+
                     if (!finished)
                     {
                         return new ToolResult
                         {
                             Ok = false,
+                            ExitCode = -1,
                             Output = "命令超过 " + timeout + " 秒未结束，已终止（长命令可调高「长命令超时」）\n" +
                                      (result.Length == 0 ? string.Empty : result),
                         };
@@ -241,7 +290,8 @@ namespace LangCode.Workspace
                     return new ToolResult
                     {
                         Ok = exitCode == 0,
-                        Output = result.Length == 0 ? "（命令无输出，退出码 " + exitCode + "）" : result + "\n（退出码 " + exitCode + "）",
+                        ExitCode = exitCode,
+                        Output = result.Length == 0 ? "（命令无输出）" : result,
                     };
                 }
             }
@@ -254,7 +304,12 @@ namespace LangCode.Workspace
                 return text;
             }
 
-            return text.Substring(0, MaxOutputChars) + "\n…（输出过长，已截断到 " + MaxOutputChars + " 字符）";
+            // 命令的错误信息通常出现在末尾：头尾都保留，别只留开头
+            var head = MaxOutputChars * 7 / 10;
+            var tail = MaxOutputChars - head;
+            return text.Substring(0, head) +
+                   "\n…（中间省略，输出过长已截断到 " + MaxOutputChars + " 字符）…\n" +
+                   text.Substring(text.Length - tail);
         }
 
         /// <summary>
@@ -277,8 +332,10 @@ namespace LangCode.Workspace
                 var combined = Path.GetFullPath(Path.Combine(Root, workingDirectory.Trim().Replace('/', '\\')));
                 var normalizedRoot = Path.GetFullPath(Root);
 
-                var inside = combined.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
-                return inside && Directory.Exists(combined) ? combined : Root;
+                // 必须带目录分隔符比较：否则 C:\repo 会误放行 C:\repo-old
+                return IsWithinDirectory(combined, normalizedRoot) && Directory.Exists(combined)
+                    ? combined
+                    : Root;
             }
             catch (Exception)
             {
@@ -286,8 +343,54 @@ namespace LangCode.Workspace
             }
         }
 
-        private static void TryKill(Process process)
+        private static bool IsWithinDirectory(string full, string root)
         {
+            var normalizedRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(full, normalizedRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var prefix = normalizedRoot + Path.DirectorySeparatorChar;
+            return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void TryKillTree(Process process)
+        {
+            int processId;
+            try
+            {
+                if (process.HasExited)
+                {
+                    return;
+                }
+
+                processId = process.Id;
+            }
+            catch (Exception)
+            {
+                return;
+            }
+
+            // taskkill /T 才能把 npm → node、dotnet → MSBuild 这类子进程一并收掉
+            try
+            {
+                var startInfo = new ProcessStartInfo("taskkill", "/T /F /PID " + processId)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+
+                using (var killer = Process.Start(startInfo))
+                {
+                    killer?.WaitForExit(3000);
+                }
+            }
+            catch (Exception)
+            {
+                // taskkill 不可用 / 无权限：退回到只杀主进程
+            }
+
             try
             {
                 if (!process.HasExited)
@@ -303,7 +406,7 @@ namespace LangCode.Workspace
 
         private static ToolResult Failure(string message)
         {
-            return new ToolResult { Ok = false, Output = message };
+            return new ToolResult { Ok = false, ExitCode = -1, Output = message };
         }
     }
 }
