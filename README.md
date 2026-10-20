@@ -15,7 +15,7 @@
 </p>
 
 <p>
-  <a href="https://gitee.com/li_qi_lang/lang-code/releases"><img src="https://img.shields.io/badge/下载-LangCode.vsix-c71d23.svg" alt="下载安装包" /></a>
+  <a href="https://gitee.com/li_qi_lang/lang-code/raw/master/dist/LangCode.vsix"><img src="https://img.shields.io/badge/下载-LangCode.vsix-c71d23.svg" alt="下载安装包" /></a>
 </p>
 
 <p>
@@ -46,7 +46,6 @@
 - [支持的 AI 模型](#支持的-ai-模型)
 - [安全与隐私](#安全与隐私)
 - [数据存在哪里](#数据存在哪里)
-- [从源码构建](#从源码构建)
 - [项目结构](#项目结构)
 - [深入文档](#深入文档)
 - [许可证](#许可证)
@@ -176,26 +175,12 @@ LangCode 的核心不是一个「问答接口」，而是一个 **Agent 循环**
 
 ### 安装
 
-**方式一：直接下载安装包（推荐，无需登录）**
+1. 下载安装包：[LangCode.vsix](https://gitee.com/li_qi_lang/lang-code/raw/master/dist/LangCode.vsix)
+2. 关闭 Visual Studio；
+3. 双击下载好的 `.vsix`，按向导完成安装；
+4. 重新打开 Visual Studio，在 **扩展 → 管理扩展 → 已安装** 中确认 LangCode 已启用。
 
-- 下载地址：[`dist/LangCode.vsix`](https://gitee.com/li_qi_lang/lang-code/raw/master/dist/LangCode.vsix)
-- 校验文件：[`dist/SHA256SUMS.txt`](https://gitee.com/li_qi_lang/lang-code/blob/master/dist/SHA256SUMS.txt)
-
-下载后关闭 Visual Studio，双击 `.vsix`，按向导完成安装；重新打开 VS，在 **扩展 → 管理扩展 → 已安装** 中确认 LangCode 已启用。
-
-**方式二：从 Gitee 发行版下载**
-
-打开 [Gitee 发行版页面](https://gitee.com/li_qi_lang/lang-code/releases)，在对应版本中下载 `LangCode.vsix` 或带版本号的 `LangCode-1.0.0.vsix`。发行版适合固定版本、归档与回滚。
-
-**方式三：从源码构建安装包**
-
-```cmd
-scripts\package.cmd
-```
-
-产物为 `dist\LangCode.vsix`，双击即可安装。完整命令与手动构建步骤见 [安装与分发](docs/install.md)。
-
-> 安装、升级、卸载、企业离线部署与常见问题，统一见 [安装与分发](docs/install.md)。
+> 升级、卸载与常见问题见 [安装与分发](docs/install.md)。
 
 ### 配置并使用
 
@@ -300,37 +285,6 @@ scripts\package.cmd
 
 想重置设置就删掉 `settings.json`；想清空历史就删掉 `conversations` 目录；想同时清掉检查点就删掉 `checkpoints` 目录。
 
-## 从源码构建
-
-一键打包（还原 + Release 构建 + 复制到 `dist/` + 生成 SHA256 校验文件）：
-
-```cmd
-scripts\package.cmd
-```
-
-手动构建：
-
-```cmd
-:: 还原依赖
-dotnet restore LangCode.sln
-
-:: 构建（Release）
-dotnet build LangCode/LangCode.csproj -c Release
-```
-
-- 生成程序集：`LangCode/bin/Release/net472/LangCode.dll`
-- 生成安装包：`LangCode/bin/Release/net472/LangCode.vsix`
-- 分发副本：`dist/LangCode.vsix`、`dist/LangCode-<版本>.vsix`、`dist/SHA256SUMS.txt`
-
-发布到 Gitee 发行版（需要私人令牌）：
-
-```cmd
-set GITEE_TOKEN=你的令牌
-powershell -ExecutionPolicy Bypass -File scripts\publish-gitee.ps1
-```
-
-调试时项目会以 Visual Studio **实验实例**（`/rootsuffix Exp`）启动，不影响你日常使用的 VS。
-
 ## 项目结构
 
 ```
@@ -352,7 +306,7 @@ LangCode/
 
 | 文档                                    | 内容                                                                                        |
 | --------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [安装与分发](docs/install.md)           | 下载渠道、安装 / 升级 / 卸载、企业离线部署、SHA256 校验、常见问题、打包与发布流程           |
+| [安装与分发](docs/install.md)           | 下载、安装、升级、卸载、首次配置与常见问题                                                  |
 | [AI 与自动化能力总览](docs/ai-agent.md) | Agent 循环、子任务、任务清单、主动提问、计划模式、自动验证 / 修复、上下文与成本、安全与回退 |
 | [工具参考](docs/tools.md)               | 全部 24 个工具的参数、审批类别、破坏性标记、调用协议与示例                                  |
 | [文档索引](docs/README.md)              | 文档导航与名词解释                                                                          |
