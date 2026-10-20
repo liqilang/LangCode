@@ -9,11 +9,11 @@
 
 ## 下载渠道
 
-| 渠道                 | 地址                                                                   | 说明                                     |
-| -------------------- | ---------------------------------------------------------------------- | ---------------------------------------- |
-| Gitee 发行版（推荐） | <https://gitee.com/li_qi_lang/lang-code/releases>                      | 附件形式提供固定版本的安装包，最稳定     |
-| 仓库直链             | <https://gitee.com/li_qi_lang/lang-code/raw/master/dist/LangCode.vsix> | 始终指向 `master` 上的最新构建，适合尝鲜 |
-| 从源码构建           | `scripts\package.cmd`                                                  | 开发者自行打包，产物在 `dist\`           |
+| 渠道             | 地址                                                                   | 说明                                           |
+| ---------------- | ---------------------------------------------------------------------- | ---------------------------------------------- |
+| 仓库直链（推荐） | <https://gitee.com/li_qi_lang/lang-code/raw/master/dist/LangCode.vsix> | 免登录直接下载，始终指向 `master` 上的最新构建 |
+| Gitee 发行版     | <https://gitee.com/li_qi_lang/lang-code/releases>                      | 正式版本归档，适合固定版本、回滚与企业分发     |
+| 从源码构建       | `scripts\package.cmd`                                                  | 开发者自行打包，产物在 `dist\`                 |
 
 安装包文件名：
 
@@ -36,7 +36,7 @@
 
 ### 双击安装（推荐）
 
-1. 从发行版或仓库下载 `LangCode.vsix`；
+1. 从仓库直链或 Gitee 发行版下载 `LangCode.vsix`；
 2. 关闭 Visual Studio；
 3. 双击 `.vsix` 文件；
 4. 在 VSIX Installer 窗口中勾选要安装的 Visual Studio 2022 实例，点 **Install**；

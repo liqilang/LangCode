@@ -176,17 +176,16 @@ LangCode 的核心不是一个「问答接口」，而是一个 **Agent 循环**
 
 ### 安装
 
-**方式一：从 Gitee 发行版下载（推荐）**
+**方式一：直接下载安装包（推荐，无需登录）**
 
-1. 打开 [Gitee 发行版页面](https://gitee.com/li_qi_lang/lang-code/releases)；
-2. 在最新版本中下载 `LangCode.vsix`（也可下载带版本号的 `LangCode-1.0.0.vsix`）；
-3. 关闭 Visual Studio，双击下载好的 `.vsix`，按向导完成安装；
-4. 重新打开 Visual Studio，在 **扩展 → 管理扩展 → 已安装** 中确认 LangCode 已启用。
-
-**方式二：直接下载仓库中的安装包**
-
-- 稳定下载地址：[`dist/LangCode.vsix`](https://gitee.com/li_qi_lang/lang-code/raw/master/dist/LangCode.vsix)
+- 下载地址：[`dist/LangCode.vsix`](https://gitee.com/li_qi_lang/lang-code/raw/master/dist/LangCode.vsix)
 - 校验文件：[`dist/SHA256SUMS.txt`](https://gitee.com/li_qi_lang/lang-code/blob/master/dist/SHA256SUMS.txt)
+
+下载后关闭 Visual Studio，双击 `.vsix`，按向导完成安装；重新打开 VS，在 **扩展 → 管理扩展 → 已安装** 中确认 LangCode 已启用。
+
+**方式二：从 Gitee 发行版下载**
+
+打开 [Gitee 发行版页面](https://gitee.com/li_qi_lang/lang-code/releases)，在对应版本中下载 `LangCode.vsix` 或带版本号的 `LangCode-1.0.0.vsix`。发行版适合固定版本、归档与回滚。
 
 **方式三：从源码构建安装包**
 
