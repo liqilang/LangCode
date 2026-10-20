@@ -1,6 +1,20 @@
-<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0"
+                 xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011"
+                 xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+  <!--
+    说明：真正参与构建的是 source.extension.vsixmanifest。
+    本文件保留为同内容的副本，避免仓库里出现两个版本号 / 两个主页地址。
+  -->
   <Metadata>
-    <Identity Id="LangCode.4f6c1b2e-9a3d-4c7e-8b21-5d0e6f7a8b9c" Version="1.0.0" Language="zh-CN" Publisher="LangCode" DisplayName="LangCode —— VS AI 编程助手" Description="基于 WPF 的 Visual Studio AI 编程助手工具窗口（对话 / 工具调用 / Diff 审批 / MCP / 设置）" MoreInfoUrl="https://github.com/langcode/langcode" />
+    <Identity Id="LangCode.4f6c1b2e-9a3d-4c7e-8b21-5d0e6f7a8b9c"
+              Version="1.0.0"
+              Language="zh-CN"
+              Publisher="LangCode" />
+    <DisplayName>LangCode</DisplayName>
+    <Description>基于 WPF 的 Visual Studio AI 编程助手工具窗口（对话 / 工具调用 / Diff 审批 / MCP / 设置）</Description>
+    <MoreInfoUrl>https://gitee.com/li_qi_lang/lang-code</MoreInfoUrl>
+    <Icon>icon.png</Icon>
     <Tags>AI, 编程助手, WPF, Agent, MCP</Tags>
   </Metadata>
   <Installation>

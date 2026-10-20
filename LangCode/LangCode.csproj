@@ -52,9 +52,14 @@
     </VSCTCompile>
   </ItemGroup>
 
-  <ItemGroup> 
+  <ItemGroup>
     <Content Include="Ui\Assets\Icons\*.svg">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory> 
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <!-- 扩展管理器里展示的图标（source.extension.vsixmanifest 的 <Icon> 指向它） -->
+    <Content Include="..\Images\icon.png">
+      <Link>icon.png</Link>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
   </ItemGroup>

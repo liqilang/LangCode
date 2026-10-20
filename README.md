@@ -15,7 +15,13 @@
 </p>
 
 <p>
+  <a href="https://gitee.com/li_qi_lang/lang-code/releases"><img src="https://img.shields.io/badge/下载-LangCode.vsix-c71d23.svg" alt="下载安装包" /></a>
+</p>
+
+<p>
+  <a href="#安装">下载安装</a> ·
   <a href="#快速开始">快速开始</a> ·
+  <a href="https://gitee.com/li_qi_lang/lang-code">Gitee 仓库</a> ·
   <a href="docs/ai-agent.md">AI 与自动化</a> ·
   <a href="docs/tools.md">工具参考</a> ·
   <a href="docs/README.md">文档索引</a>
@@ -34,6 +40,7 @@
 - [AI Agent 是怎么工作的](#ai-agent-是怎么工作的)
 - [长任务编排：任务清单、子任务与提问](#长任务编排任务清单子任务与提问)
 - [工具能力全景](#工具能力全景)
+- [下载与安装](#安装)
 - [快速开始](#快速开始)
 - [怎么用](#怎么用)
 - [支持的 AI 模型](#支持的-ai-模型)
@@ -61,7 +68,6 @@
 
 ### AI 编排与审批
 
-<!-- 截图命名约定：Images/features/提问.png、任务清单.png、子任务.png、审批.png -->
 <table align="center">
   <tr>
     <td align="center"><img src="Images/提问.png" alt="主动提问" width="420" /><br /><sub>主动提问</sub></td>
@@ -170,19 +176,27 @@ LangCode 的核心不是一个「问答接口」，而是一个 **Agent 循环**
 
 ### 安装
 
-**方式一：在 Visual Studio 里直接搜索安装（推荐）**
+**方式一：从 Gitee 发行版下载（推荐）**
 
-1. 打开 Visual Studio 2022；
-2. 顶部菜单栏选择 **扩展 → 管理扩展**（Extensions → Manage Extensions）；
-3. 在左侧切换到 **联机 / Online**，在右上角搜索框输入 `LangCode`；
-4. 在搜索结果里找到 **LangCode**，点击 **下载 / 安装**；
-5. 按提示关闭 Visual Studio，安装程序会自动完成安装，重新打开 Visual Studio 即可使用。
+1. 打开 [Gitee 发行版页面](https://gitee.com/li_qi_lang/lang-code/releases)；
+2. 在最新版本中下载 `LangCode.vsix`（也可下载带版本号的 `LangCode-1.0.0.vsix`）；
+3. 关闭 Visual Studio，双击下载好的 `.vsix`，按向导完成安装；
+4. 重新打开 Visual Studio，在 **扩展 → 管理扩展 → 已安装** 中确认 LangCode 已启用。
 
-**方式二：使用 VSIX 安装包**
+**方式二：直接下载仓库中的安装包**
 
-1. 下载 / 构建得到 `LangCode.vsix`；
-2. 双击按提示安装（也可以把 VSIX 放进 `%VSINSTALLDIR%\Common7\IDE\Extensions\` 手动部署）；
-3. 重启 Visual Studio。
+- 稳定下载地址：[`dist/LangCode.vsix`](https://gitee.com/li_qi_lang/lang-code/raw/master/dist/LangCode.vsix)
+- 校验文件：[`dist/SHA256SUMS.txt`](https://gitee.com/li_qi_lang/lang-code/blob/master/dist/SHA256SUMS.txt)
+
+**方式三：从源码构建安装包**
+
+```cmd
+scripts\package.cmd
+```
+
+产物为 `dist\LangCode.vsix`，双击即可安装。完整命令与手动构建步骤见 [安装与分发](docs/install.md)。
+
+> 安装、升级、卸载、企业离线部署与常见问题，统一见 [安装与分发](docs/install.md)。
 
 ### 配置并使用
 
@@ -289,6 +303,14 @@ LangCode 的核心不是一个「问答接口」，而是一个 **Agent 循环**
 
 ## 从源码构建
 
+一键打包（还原 + Release 构建 + 复制到 `dist/` + 生成 SHA256 校验文件）：
+
+```cmd
+scripts\package.cmd
+```
+
+手动构建：
+
 ```cmd
 :: 还原依赖
 dotnet restore LangCode.sln
@@ -299,6 +321,14 @@ dotnet build LangCode/LangCode.csproj -c Release
 
 - 生成程序集：`LangCode/bin/Release/net472/LangCode.dll`
 - 生成安装包：`LangCode/bin/Release/net472/LangCode.vsix`
+- 分发副本：`dist/LangCode.vsix`、`dist/LangCode-<版本>.vsix`、`dist/SHA256SUMS.txt`
+
+发布到 Gitee 发行版（需要私人令牌）：
+
+```cmd
+set GITEE_TOKEN=你的令牌
+powershell -ExecutionPolicy Bypass -File scripts\publish-gitee.ps1
+```
 
 调试时项目会以 Visual Studio **实验实例**（`/rootsuffix Exp`）启动，不影响你日常使用的 VS。
 
@@ -323,6 +353,7 @@ LangCode/
 
 | 文档                                    | 内容                                                                                        |
 | --------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [安装与分发](docs/install.md)           | 下载渠道、安装 / 升级 / 卸载、企业离线部署、SHA256 校验、常见问题、打包与发布流程           |
 | [AI 与自动化能力总览](docs/ai-agent.md) | Agent 循环、子任务、任务清单、主动提问、计划模式、自动验证 / 修复、上下文与成本、安全与回退 |
 | [工具参考](docs/tools.md)               | 全部 24 个工具的参数、审批类别、破坏性标记、调用协议与示例                                  |
 | [文档索引](docs/README.md)              | 文档导航与名词解释                                                                          |

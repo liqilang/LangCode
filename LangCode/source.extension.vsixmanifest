@@ -13,7 +13,8 @@
               Publisher="LangCode" />
     <DisplayName>LangCode</DisplayName>
     <Description>基于 WPF 的 Visual Studio AI 编程助手工具窗口（对话 / 工具调用 / Diff 审批 / MCP / 设置）</Description>
-    <MoreInfoUrl>https://github.com/langcode/langcode</MoreInfoUrl>
+    <MoreInfoUrl>https://gitee.com/li_qi_lang/lang-code</MoreInfoUrl>
+    <Icon>icon.png</Icon>
   </Metadata>
   <Installation>
     <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0,18.0)">

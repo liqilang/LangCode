@@ -24,6 +24,12 @@
 *.vsix
 *.vsixmanifest.bak
 
+# 发布用的安装包：dist/ 下保留可直接下载的 VSIX 与校验文件
+# （其余位置的 *.vsix 仍视为构建产物，不入库）
+!dist/
+!dist/*.vsix
+!dist/SHA256SUMS.txt
+
 # 本仓库特有的历史遗留产物名（工程曾命名为 F.VsExt）
 F.VsExt.*
 
