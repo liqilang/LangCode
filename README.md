@@ -5,18 +5,13 @@
 <h1>LangCode</h1>
 
 <p><strong>Visual Studio 里的 AI 编程助手</strong></p>
-
-<a href="https://gitee.com/li_qi_lang/lang-code"><img src="https://gitee.com/li_qi_lang/lang-code/badge/star.svg?theme=white" alt="Gitee Star" /></a>
-<a href="https://gitee.com/li_qi_lang/lang-code"><img src="https://gitee.com/li_qi_lang/lang-code/badge/fork.svg?theme=white" alt="Gitee Fork" /></a>
+ 
 <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" />
 <img src="https://img.shields.io/badge/Visual%20Studio-2022%20(17.0%2B)-5C2D91.svg" alt="Visual Studio" />
 <img src="https://img.shields.io/badge/.NET%20Framework-4.7.2-512BD4.svg" alt=".NET Framework" />
-
+ <a href="https://gitee.com/li_qi_lang/lang-code/raw/master/dist/LangCode.vsix"><img src="https://img.shields.io/badge/下载-LangCode.vsix-c71d23.svg" alt="下载安装包" /></a>
 </p>
 
-<p>
-  <a href="https://gitee.com/li_qi_lang/lang-code/raw/master/dist/LangCode.vsix"><img src="https://img.shields.io/badge/下载-LangCode.vsix-c71d23.svg" alt="下载安装包" /></a>
-</p>
 
 <p>
   <a href="#快速开始">快速开始</a> ·
