@@ -391,6 +391,9 @@ namespace LangCode.Ui.ToolWindows
 
         private void MentionBtn_Click(object sender, RoutedEventArgs e)
         {
+            // 重扫 @ 索引时会读取 VS 工作区信息，必须处于 UI 线程
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             var open = !MentionPopup.IsOpen;
             ClosePopups();
 

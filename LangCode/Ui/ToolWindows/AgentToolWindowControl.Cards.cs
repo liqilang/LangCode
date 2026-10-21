@@ -58,6 +58,9 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void AddToolCard(ChatMessage message, ToolAction action, ToolResult result)
         {
+            // 卡片会触发「跟随打开」等 DTE 调用，只能在 UI 线程执行
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             if (message == null || action == null)
             {
                 return;
@@ -151,8 +154,11 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private Task<bool> ApproveActionAsync(ChatMessage message, ToolAction action, ToolResult result)
         {
-            return Dispatcher.InvokeAsync(() =>
+            return Dispatcher.InvokeAsync(async () =>
             {
+                await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory
+                    .SwitchToMainThreadAsync();
+
                 var card = new ChatBlock
                 {
                     Kind = ChatBlockKind.Approval,
@@ -165,7 +171,7 @@ namespace LangCode.Ui.ToolWindows
                 _askedActions.Add(action);
                 message.Blocks.Add(card);
 
-                return WaitForApproval(card);
+                return await WaitForApprovalAsync(card);
             }).Task.Unwrap();
         }
 
@@ -340,7 +346,10 @@ namespace LangCode.Ui.ToolWindows
                     RefreshRequestBar();
                     ScrollToEnd();
 
+                    // 这个 TCS 由界面线程（用户点击 / 回车）完成，属于有意为之的跨上下文等待
+#pragma warning disable VSTHRD003
                     return await _pendingQuestion.Task.ConfigureAwait(true);
+#pragma warning restore VSTHRD003
                 }
                 finally
                 {
@@ -446,12 +455,10 @@ namespace LangCode.Ui.ToolWindows
                 message.Blocks.Add(card);
 
                 // 从这一刻起，子任务内部产生的卡片都缩进一格（父任务的卡片不受影响）
-                _subTaskVisualDepth = 1;
                 message.CurrentDepth = 1;
             }
             else
             {
-                _subTaskVisualDepth = 0;
                 message.CurrentDepth = 0;
 
                 var card = _subTaskCard;

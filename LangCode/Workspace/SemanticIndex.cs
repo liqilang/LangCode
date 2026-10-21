@@ -477,7 +477,10 @@ namespace LangCode.Workspace
 
                 try
                 {
+                    // 索引查询是同步 API，且只会在后台线程调用；这里等待后台建索引完成是刻意设计
+#pragma warning disable VSTHRD002
                     build.Wait();
+#pragma warning restore VSTHRD002
                 }
                 catch (AggregateException)
                 {

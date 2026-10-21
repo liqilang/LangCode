@@ -76,12 +76,6 @@ namespace LangCode.Ui.ToolWindows
         private ChatBlock _subTaskCard;
 
         /// <summary>
-        /// 子任务运行期间的视觉层级：1 = 正在跑子任务，期间新建的卡片都缩进一格
-        /// 由 <see cref="ShowSubTask"/> 在开始 / 结束时切换
-        /// </summary>
-        private int _subTaskVisualDepth;
-
-        /// <summary>
         /// 本轮真正落盘的改动（按发生顺序），「撤销修改」按相反顺序回滚它们
         /// </summary>
         private readonly List<PendingEdit> _turnEdits = [];

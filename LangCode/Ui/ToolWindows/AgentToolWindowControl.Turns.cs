@@ -136,6 +136,9 @@ namespace LangCode.Ui.ToolWindows
 
             // 自动上下文：把「当前文件 / 选中代码 / 编译诊断」附在这一轮请求里
             // 只在用户主动发送时采集（续跑 / 排队不重复采集，避免噪声叠加）
+            // 采集过程要读 DTE：显式切回 UI 线程（async 方法里用 Switch 而不是抛异常）
+            await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory
+                .SwitchToMainThreadAsync();
             if (includeAutoContext)
             {
                 var autoContext = BuildAutoContext();
@@ -210,6 +213,9 @@ namespace LangCode.Ui.ToolWindows
                     (_turnEdits.Count > 0 || _turnCanContinue || _turnCanRetry ||
                      (assistant != null && assistant.Blocks.Count > 3)))
                 {
+                    // 上面几处 await 之后仍要求回到 UI 线程（通知要写状态栏）
+                    await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory
+                        .SwitchToMainThreadAsync();
                     VsNotifier.Notify(
                         _turnCanRetry ? "LangCode：任务出错，可重试"
                         : _turnInterrupted ? "LangCode：任务已中断"
@@ -313,7 +319,11 @@ namespace LangCode.Ui.ToolWindows
                     DispatcherPriority.Background),
 
                 OnToolResult = (action, result) => Dispatcher.BeginInvoke(
-                    new Action(() => AddToolCard(assistant, action, result)),
+                    new Action(() =>
+                    {
+                        Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+                        AddToolCard(assistant, action, result);
+                    }),
                     DispatcherPriority.Background),
 
                 // 达到最大步数：必须给用户一句明确交代，否则看起来就是「说着说着没了」
@@ -347,6 +357,8 @@ namespace LangCode.Ui.ToolWindows
                 OnEditApplied = edit => Dispatcher.BeginInvoke(
                     new Action(() =>
                     {
+                        Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
                         if (edit != null)
                         {
                             _turnEdits.Add(edit);
@@ -402,7 +414,11 @@ namespace LangCode.Ui.ToolWindows
 
                 // 转到定义：借用 VS 自带的 Roslyn，必须在 UI 线程执行
                 GoToDefinition = (path, line) => Dispatcher.BeginInvoke(
-                    new Action(() => VsFileOpener.GoToDefinition(ResolveInRoot(path), line)),
+                    new Action(() =>
+                    {
+                        Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+                        VsFileOpener.GoToDefinition(ResolveInRoot(path), line);
+                    }),
                     DispatcherPriority.Background),
 
                 // 自动修复：Agent 需要读编译诊断时回调到 UI 线程采集（DTE 只能在主线程访问）
@@ -415,7 +431,11 @@ namespace LangCode.Ui.ToolWindows
 
                     cancellationToken.ThrowIfCancellationRequested();
                     return await Dispatcher
-                        .InvokeAsync(() => VsDiagnosticsReader.TryRead())
+                        .InvokeAsync(() =>
+                        {
+                            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+                            return VsDiagnosticsReader.TryRead();
+                        })
                         .Task
                         .ConfigureAwait(true);
                 },
@@ -423,11 +443,19 @@ namespace LangCode.Ui.ToolWindows
                 // 调试器操作（断点 / 单步 / 栈 / 求值）：DTE 只能在 UI 线程访问，
                 // 因此封送到 Dispatcher 执行，再把结果文本回灌给模型
                 DebugControlAsync = (command, cancellationToken) => Dispatcher
-                    .InvokeAsync(() => VsDebuggerController.Execute(command, _workspaceRoot))
+                    .InvokeAsync(() =>
+                    {
+                        Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+                        return VsDebuggerController.Execute(command, _workspaceRoot);
+                    })
                     .Task,
 
                 // 未保存的编辑器缓冲区不能被 AI 的磁盘写入覆盖
-                IsFileDirty = relativePath => Dispatcher.Invoke(() => VsFileOpener.IsDocumentDirty(ResolveInRoot(relativePath))),
+                IsFileDirty = relativePath => Dispatcher.Invoke(() =>
+                {
+                    Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+                    return VsFileOpener.IsDocumentDirty(ResolveInRoot(relativePath));
+                }),
 
                 // 自动验证 / 自动修复过程中的便签（复用当前助手消息）
                 OnNotice = text => Dispatcher.BeginInvoke(
@@ -516,6 +544,9 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void NotifyIfEnabled(string message, bool beep)
         {
+            // 通知会写 VS 状态栏，只能在 UI 线程调用
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             if (!_settings.DesktopNotifications)
             {
                 return;
@@ -532,6 +563,9 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private string BuildAutoContext()
         {
+            // 下面读活动文档 / 选中代码 / 编译诊断，全部依赖 DTE，必须处于 UI 线程
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             if (_settings == null || !_settings.AutoContext || _workspace == null)
             {
                 return null;

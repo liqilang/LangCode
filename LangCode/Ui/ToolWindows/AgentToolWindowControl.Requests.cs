@@ -438,8 +438,7 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void CopyMessage_Click(object sender, RoutedEventArgs e)
         {
-            var message = (sender as FrameworkElement)?.DataContext as ChatMessage;
-            if (message == null)
+            if ((sender as FrameworkElement)?.DataContext is not ChatMessage message)
             {
                 return;
             }
@@ -472,8 +471,7 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private async void RestoreCheckpoint_Click(object sender, RoutedEventArgs e)
         {
-            var message = (sender as FrameworkElement)?.DataContext as ChatMessage;
-            if (message == null || !message.HasCheckpoint)
+            if ((sender as FrameworkElement)?.DataContext is not ChatMessage message || !message.HasCheckpoint)
             {
                 return;
             }
@@ -528,8 +526,7 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void EditMessage_Click(object sender, RoutedEventArgs e)
         {
-            var message = (sender as FrameworkElement)?.DataContext as ChatMessage;
-            if (message == null || !message.IsUser)
+            if ((sender as FrameworkElement)?.DataContext is not ChatMessage message || !message.IsUser)
             {
                 return;
             }
@@ -551,8 +548,7 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void CancelEditMessage_Click(object sender, RoutedEventArgs e)
         {
-            var message = (sender as FrameworkElement)?.DataContext as ChatMessage;
-            if (message == null)
+            if ((sender as FrameworkElement)?.DataContext is not ChatMessage message)
             {
                 return;
             }
@@ -566,8 +562,7 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void SaveEditMessage_Click(object sender, RoutedEventArgs e)
         {
-            var message = (sender as FrameworkElement)?.DataContext as ChatMessage;
-            if (message != null)
+            if (sender is FrameworkElement { DataContext: ChatMessage message })
             {
                 _ = SaveEditedAsync(message);
             }
@@ -618,8 +613,7 @@ namespace LangCode.Ui.ToolWindows
             {
                 await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-                var message = (sender as FrameworkElement)?.DataContext as ChatMessage;
-                if (message == null)
+                if ((sender as FrameworkElement)?.DataContext is not ChatMessage message)
                 {
                     return;
                 }
@@ -758,8 +752,13 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private Task<bool> ApproveEditAsync(ChatMessage message, PendingEdit edit)
         {
-            return Dispatcher.InvokeAsync(() =>
+            return Dispatcher.InvokeAsync(async () =>
             {
+                // 派发到界面线程执行；用 Switch 而不是抛异常，Task 返回的 lambda 里
+                // 抛断言会被分析器判为错误（VSTHRD010 的 async 变体）
+                await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory
+                    .SwitchToMainThreadAsync();
+
                 // 标题说清这是「新增文件」还是「编辑文件」；是否已落盘由状态文案（已应用）与
                 // 底栏（等待确认）表达，标题本身不必再分 Proposed / Applied
                 var card = new ChatBlock
@@ -777,7 +776,7 @@ namespace LangCode.Ui.ToolWindows
                 };
 
                 message.Blocks.Add(card);
-                return WaitForApproval(card);
+                return await WaitForApprovalAsync(card);
             }).Task.Unwrap();
         }
 
@@ -785,7 +784,7 @@ namespace LangCode.Ui.ToolWindows
         /// 把一张待批卡片接到请求条上，返回「等用户点允许 / 拒绝」的任务。
         /// 并行子任务可能同时请求审批，这里用信号量串行化：一次只显示一张。
         /// </summary>
-        private async Task<bool> WaitForApproval(ChatBlock card)
+        private async Task<bool> WaitForApprovalAsync(ChatBlock card)
         {
             await _approvalGate.WaitAsync().ConfigureAwait(true);
             try
@@ -801,13 +800,20 @@ namespace LangCode.Ui.ToolWindows
                 _pendingCard = card;
                 _pendingApproval = new TaskCompletionSource<bool>();
 
+                // 上面等信号量的 await 之后要重新确保回到 UI 线程（通知与界面更新都需要）
+                await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory
+                    .SwitchToMainThreadAsync();
+
                 // 待批是阻塞的：用户在别的窗口时也要能立刻知道「这里卡住了」
                 NotifyIfEnabled("LangCode：有一个操作等待你确认", beep: true);
 
                 RefreshRequestBar();
                 ScrollToEnd();
 
+                // 这个 TCS 由界面线程（用户点击）完成，属于有意为之的跨上下文等待
+#pragma warning disable VSTHRD003
                 return await _pendingApproval.Task.ConfigureAwait(true);
+#pragma warning restore VSTHRD003
             }
             finally
             {

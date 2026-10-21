@@ -120,7 +120,11 @@ namespace LangCode.Workspace
                     List<MentionItem> items;
                     try
                     {
+                        // 这个属性本身就是同步 API（调用方都不是 VS UI 线程），
+                        // 这里同步等待后台扫描完成是有意为之，不会造成 UI 死锁
+#pragma warning disable VSTHRD002
                         items = scan.Result;
+#pragma warning restore VSTHRD002
                     }
                     catch (AggregateException)
                     {
@@ -214,7 +218,10 @@ namespace LangCode.Workspace
         {
             try
             {
+                // 只在任务已完成时调用（见 TryGetAll），取结果不会真正阻塞
+#pragma warning disable VSTHRD002
                 return scan.Result ?? new List<MentionItem>();
+#pragma warning restore VSTHRD002
             }
             catch (AggregateException)
             {

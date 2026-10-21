@@ -57,6 +57,9 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void FollowOpen(string relativePath, int line)
         {
+            // 解析路径 / 打开文件都要碰 DTE，只能在 UI 线程执行
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             if (!_settings.FollowFileChanges)
             {
                 return;
@@ -74,6 +77,9 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void FollowEdit(PendingEdit edit)
         {
+            // 打开差异对比同样依赖 DTE，只能在 UI 线程执行
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             if (!_settings.FollowFileChanges || edit == null)
             {
                 return;
@@ -91,6 +97,8 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void Path_Click(object sender, MouseButtonEventArgs e)
         {
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             if (OpenBlockInVs(BlockOf(sender)))
             {
                 e.Handled = true;
@@ -103,6 +111,8 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void Card_Click(object sender, MouseButtonEventArgs e)
         {
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             if (OpenBlockInVs(BlockOf(sender)))
             {
                 e.Handled = true;
@@ -115,6 +125,8 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private bool OpenBlockInVs(ChatBlock block)
         {
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             if (block == null || string.IsNullOrWhiteSpace(block.Path))
             {
                 return false;
@@ -171,8 +183,9 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private void SummaryPath_Click(object sender, MouseButtonEventArgs e)
         {
-            var change = (sender as FrameworkElement)?.DataContext as SessionChange;
-            if (change == null || string.IsNullOrWhiteSpace(change.Path))
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
+            if ((sender as FrameworkElement)?.DataContext is not SessionChange change || string.IsNullOrWhiteSpace(change.Path))
             {
                 return;
             }
@@ -208,6 +221,8 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private string ResolveInRoot(string relativePath)
         {
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             return VsFileOpener.ResolveInRoot(CurrentRootForResolve(), relativePath);
         }
 
@@ -217,6 +232,8 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private string ResolveInRootAllowMissing(string relativePath)
         {
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             return VsFileOpener.ResolveInRootAllowMissing(CurrentRootForResolve(), relativePath);
         }
 
@@ -226,6 +243,9 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private string CurrentRootForResolve()
         {
+            // EnsureWorkspace / VsWorkspaceLocator 都会访问 DTE，只能在 UI 线程执行
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             EnsureWorkspace();
 
             var root = _workspace?.Root;

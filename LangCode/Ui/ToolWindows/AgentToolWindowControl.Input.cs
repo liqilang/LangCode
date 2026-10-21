@@ -24,6 +24,9 @@ namespace LangCode.Ui.ToolWindows
         // ============================================================
         private void Input_TextChanged(object sender, TextChangedEventArgs e)
         {
+            // 下面刷新 @ 提及索引时会访问 DTE，必须处于 UI 线程
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             UpdateSendState();
             AutoResizeInput();
 

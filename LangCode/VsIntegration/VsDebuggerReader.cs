@@ -46,6 +46,9 @@ namespace LangCode.VsIntegration
 
         private static void AppendBreakpoints(StringBuilder builder, Debugger debugger, int max)
         {
+            // 仅由 TryRead 在 UI 线程上调用：DTE 集合只能在主线程遍历
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             try
             {
                 var breakpoints = debugger.Breakpoints;
@@ -98,6 +101,9 @@ namespace LangCode.VsIntegration
 
         private static void AppendCurrentFrame(StringBuilder builder, Debugger debugger, int maxVariables)
         {
+            // 仅由 TryRead 在 UI 线程上调用：DTE 调用的结果只能主线程读取
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             try
             {
                 // 设计模式（未调试）时 CurrentStackFrame 通常为 null，这里自然跳过
@@ -133,6 +139,9 @@ namespace LangCode.VsIntegration
 
         private static void AppendExpressions(StringBuilder builder, Expressions expressions, string title, int max)
         {
+            // 仅由 AppendCurrentFrame 在 UI 线程上调用：表达式求值同样只能在主线程进行
+            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+
             try
             {
                 if (expressions == null || expressions.Count == 0)

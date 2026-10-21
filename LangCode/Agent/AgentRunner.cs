@@ -543,7 +543,10 @@ namespace LangCode.Agent
                     {
                         try
                         {
+                            // 任务在派发时（本方法内）就已启动，这里是收同一个上下文里发起的并行任务
+#pragma warning disable VSTHRD003
                             orderedResults[pair.Key] = await pair.Value.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
                         }
                         catch (Exception ex)
                         {
