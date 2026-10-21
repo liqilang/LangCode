@@ -82,9 +82,15 @@ namespace LangCode.Agent
                         var url = action.Get("url");
                         var fetch = string.Equals(action.Get("fetch"), "true", StringComparison.OrdinalIgnoreCase) ||
                                     string.Equals(action.Get("fetch"), "1", StringComparison.Ordinal);
+
                         return await _browser.OpenAsync(url, fetch, cancellationToken).ConfigureAwait(false);
                     }
 
+                case "web_search":
+                    {
+                        var limit = ParseInt(action.Get("limit")) ?? (_settings?.WebSearchMaxResults ?? 5);
+                        return await _webSearch.SearchAsync(action.Get("query"), limit, cancellationToken).ConfigureAwait(false);
+                    }
                 case "browser_action":
                     {
                         if (_settings != null && !_settings.BrowserAutomation)

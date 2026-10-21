@@ -584,6 +584,9 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 | `SemanticIndex`        | 本地语义索引                          | 开     |
 | `StructuredEditing`    | 结构化编辑                            | 开     |
 | `BrowserAutomation`    | 浏览器自动化                          | 开     |
+| `WebSearchProvider`    | 联网搜索提供商                        | Bing   |
+| `WebSearchMaxResults`  | 联网搜索默认条数                      | 5      |
+| `DocSearchResults`     | 文档检索默认片段数                    | 8      |
 | `Multimodal`           | 图片输入                              | 开     |
 | `BudgetUsd`            | 费用预算；0 = 不限制                  | 0      |
 | `AuditLogEnabled`      | 工具调用审计日志                      | 关     |

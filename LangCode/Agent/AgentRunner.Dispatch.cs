@@ -151,6 +151,10 @@ namespace LangCode.Agent
 
                     return "将要调用 MCP 工具：\n" + McpManager.Describe(server, action.Get("tool"), action.Get("arguments"));
 
+                case "web_search":
+                    return "将要联网搜索：\n" + (action.Get("query") ?? string.Empty) +
+                           "\n提供商：" + (_settings?.WebSearchProvider ?? "Bing");
+
                 case "debug_inspect":
                 case "debug_control":
                     return "调试器操作：" + action.Get("action") +
@@ -202,6 +206,12 @@ namespace LangCode.Agent
 
                         var limit = ParseInt(action.Get("limit")) ?? (_settings?.SemanticSearchResults ?? 8);
                         return _index.Search(action.Get("query"), limit);
+                    }
+
+                case "search_docs":
+                    {
+                        var limit = ParseInt(action.Get("limit")) ?? (_settings?.DocSearchResults ?? 8);
+                        return _workspace.SearchDocuments(action.Get("query"), action.Get("glob"), limit);
                     }
 
                 case "get_type_hierarchy":

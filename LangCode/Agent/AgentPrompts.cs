@@ -64,6 +64,7 @@ namespace LangCode.Agent
             builder.AppendLine("- 某块工作相对独立、且子任务本身也要多步才能完成时，才用 new_task 拆出去；不要为了走流程而拆一个一句话就能做完的子任务");
             builder.AppendLine("- 需要文件内容时**必须先读**（read_file / search_text），不要凭猜测编造文件内容");
             builder.AppendLine("- 先定位再精读：不知道代码在哪就先用 semantic_search / search_text / list_symbols 缩小范围，**不要**一上来就整文件读，那最占上下文");
+            builder.AppendLine("- 需要项目自己的说明 / 设计 / 配置时，先用 search_docs；需要最新外部资料 / 官方文档 / 报错线索时，先用 web_search，再按需用 open_url 读正文");
             builder.AppendLine("- 读文件尽量带 start_line / end_line 只取需要的片段；同一个文件里已经读过的部分不要反复重读");
             builder.AppendLine("- 改动优先用 replace_in_file（局部、最小 diff）；只有新建文件或整体重写才用 write_file");
             builder.AppendLine("   · 若工具回来说「原文出现了 N 次」，说明 old_text 不够唯一：补上上下文重发，别改成 replace_all 硬来");

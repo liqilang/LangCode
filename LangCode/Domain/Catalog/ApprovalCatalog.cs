@@ -71,7 +71,7 @@ namespace LangCode.Domain.Catalog
             new ApprovalCategory(Edit, "编辑已有文件", "局部替换 / 结构化编辑或覆盖已有文件", nameof(AppSettings.AutoApproveEdits), true),
             new ApprovalCategory(Create, "新增文件", "创建新文件", nameof(AppSettings.AutoApproveCreates), true),
             new ApprovalCategory(Command, "执行终端命令", "在工作区里运行 shell 命令（危险命令会被直接拒绝）", nameof(AppSettings.AutoApproveCommands), true),
-            new ApprovalCategory(Browser, "浏览器操作", "打开网页 / 抓正文，或用 DevTools 协议做导航、点击、填表、截图", nameof(AppSettings.AutoApproveBrowser), true),
+            new ApprovalCategory(Browser, "浏览器 / 联网操作", "联网搜索、打开网页 / 抓正文，或用 DevTools 协议做导航、点击、填表、截图", nameof(AppSettings.AutoApproveBrowser), true),
             new ApprovalCategory(Mcp, "MCP 工具", "调用「设置 → MCP」里已启用的服务器上的工具", nameof(AppSettings.AutoApproveMcp), true),
         ];
 

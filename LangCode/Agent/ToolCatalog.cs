@@ -163,6 +163,12 @@ namespace LangCode.Agent
 
             new ToolDescriptor("debug_control", "控制调试器：设/删断点、继续、单步、暂停、停止", "{\"action\":{\"type\":\"string\",\"description\":\"set_breakpoint / remove_breakpoint / clear_breakpoints / continue / step_over / step_into / step_out / pause / stop\"},\"path\":{\"type\":\"string\"},\"line\":{\"type\":\"integer\"},\"condition\":{\"type\":\"string\"}}", "[\"action\"]", ToolDispatch.External, true, ApprovalCatalog.Command, 24,
                 "控制调试器：{\"tool\":\"debug_control\",\"action\":\"set_breakpoint\",\"path\":\"src/App.cs\",\"line\":42,\"condition\":\"i > 3\"}\n   · action：set_breakpoint / remove_breakpoint / clear_breakpoints / continue / step_over / step_into / step_out / pause / stop\n   · 用于「跑测试/复现后断点定位」的闭环：设断点 → 单步 → get_locals / evaluate 看清状态"),
+
+            new ToolDescriptor("search_docs", "在工作区文档（README / docs / *.md / *.txt）中按关键词检索，返回相关段落与行号", "{\"query\":{\"type\":\"string\"},\"glob\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\"}}", "[\"query\"]", ToolDispatch.Local, false, ApprovalCatalog.Read, 25,
+                "文档检索（在 README / docs / *.md 里找说明、配置、设计决策）：{\"tool\":\"search_docs\",\"query\":\"上下文压缩\",\"limit\":8}\n   · 只读说明性文档，按相关度返回段落与行号；需要完整内容再用 read_file\n   · 适合回答「这个项目怎么用 / 为什么这么设计 / 某个配置在哪」"),
+
+            new ToolDescriptor("web_search", "联网搜索网页（默认 Bing，可配置 DuckDuckGo / Brave / Tavily / Serper），返回标题、URL 与摘要", "{\"query\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\"}}", "[\"query\"]", ToolDispatch.External, true, ApprovalCatalog.Browser, 26,
+                "联网搜索（需要最新信息 / 外部文档 / 排错线索时用）：{\"tool\":\"web_search\",\"query\":\"Visual Studio 2022 VSIX net472 HttpClient TLS1.2\",\"limit\":5}\n   · 返回标题、URL 与摘要；需要正文时再用 open_url 打开链接\n   · 默认 Bing 免 Key，可在「设置 → 能力 → 网络搜索」切换提供商"),
         ];
 
         // 工具名 → 描述符（大小写不敏感；模型偶尔会改动大小写）

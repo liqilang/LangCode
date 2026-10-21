@@ -536,6 +536,38 @@ namespace LangCode.Domain.Settings
         [DataMember(Name = "structuredEditing", Order = 102)]
         public bool StructuredEditing { get; set; } = true;
 
+        // ==================== 网络搜索 / 文档检索 ====================
+        /// <summary>
+        /// 文档检索默认返回的片段数（<c>search_docs</c>）
+        /// </summary>
+        [DataMember(Name = "docSearchResults", Order = 120)]
+        public int DocSearchResults { get; set; } = 8;
+
+        /// <summary>
+        /// 联网搜索提供商：DuckDuckGo / Bing / Brave / Tavily / Serper。
+        /// DuckDuckGo 与 Bing 使用公开页面 / RSS，无需 API Key；其余需要填写 Key。
+        /// </summary>
+        [DataMember(Name = "webSearchProvider", Order = 121)]
+        public string WebSearchProvider { get; set; } = "Bing";
+
+        /// <summary>
+        /// 联网搜索 API Key（Brave / Tavily / Serper 使用；落盘时走 DPAPI 加密）
+        /// </summary>
+        [DataMember(Name = "webSearchApiKey", Order = 122)]
+        public string WebSearchApiKey { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 联网搜索端点覆盖（留空使用内置地址；自建搜索网关时可填）
+        /// </summary>
+        [DataMember(Name = "webSearchEndpoint", Order = 123)]
+        public string WebSearchEndpoint { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 联网搜索默认返回条数（<c>web_search</c>）
+        /// </summary>
+        [DataMember(Name = "webSearchMaxResults", Order = 124)]
+        public int WebSearchMaxResults { get; set; } = 5;
+
         // ==================== 上下文 / 隐私 ====================
         [DataMember(Name = "autoCompactThreshold", Order = 60)]
         public string AutoCompactThreshold { get; set; } = "60%";
@@ -977,6 +1009,20 @@ namespace LangCode.Domain.Settings
 
             VerifyCommand ??= string.Empty;
 
+            // 网络搜索 / 文档检索：空值或越界时兜回默认值
+            WebSearchProvider = Fallback(WebSearchProvider, defaults.WebSearchProvider);
+            WebSearchApiKey ??= string.Empty;
+            WebSearchEndpoint ??= string.Empty;
+            if (WebSearchMaxResults <= 0)
+            {
+                WebSearchMaxResults = defaults.WebSearchMaxResults;
+            }
+
+            if (DocSearchResults <= 0)
+            {
+                DocSearchResults = defaults.DocSearchResults;
+            }
+
             // 预算：负值没有意义，统一当成「不设预算」
             if (BudgetUsd < 0)
             {
@@ -1072,6 +1118,12 @@ namespace LangCode.Domain.Settings
             SemanticChunkChars = source.SemanticChunkChars;
             StructuredEditing = source.StructuredEditing;
 
+            DocSearchResults = source.DocSearchResults;
+            WebSearchProvider = source.WebSearchProvider;
+            WebSearchApiKey = source.WebSearchApiKey;
+            WebSearchEndpoint = source.WebSearchEndpoint;
+            WebSearchMaxResults = source.WebSearchMaxResults;
+
             UseProjectRules = source.UseProjectRules;
             AutoContext = source.AutoContext;
             AutoFixProblems = source.AutoFixProblems;
@@ -1156,6 +1208,11 @@ namespace LangCode.Domain.Settings
                 SemanticIndexMaxFiles = SemanticIndexMaxFiles,
                 SemanticChunkChars = SemanticChunkChars,
                 StructuredEditing = StructuredEditing,
+                DocSearchResults = DocSearchResults,
+                WebSearchProvider = WebSearchProvider,
+                WebSearchApiKey = WebSearchApiKey,
+                WebSearchEndpoint = WebSearchEndpoint,
+                WebSearchMaxResults = WebSearchMaxResults,
                 UseProjectRules = UseProjectRules,
                 AutoContext = AutoContext,
                 AutoFixProblems = AutoFixProblems,

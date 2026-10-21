@@ -667,6 +667,38 @@ namespace LangCode.Ui.ToolWindows
             {
                 box.Text = ReadOption(box.Tag as string) ?? string.Empty;
             }
+
+            foreach (var password in Tagged<PasswordBox>(PanelsScroll))
+            {
+                password.Password = ReadOption(password.Tag as string) ?? string.Empty;
+            }
+
+            UpdateWebSearchKeyState();
+        }
+
+        /// <summary>
+        /// 只有 Brave / Tavily / Serper 需要 Key；Bing / DuckDuckGo 走公开接口，留空即可。
+        /// 输入框仍然保留（切换提供商时可以直接填），但不需要 Key 时会禁用并给出提示。
+        /// </summary>
+        private void UpdateWebSearchKeyState()
+        {
+            if (WebSearchApiKeyPanel == null)
+            {
+                return;
+            }
+
+            var provider = Settings?.WebSearchProvider ?? "Bing";
+            var needsKey = string.Equals(provider, "Brave", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(provider, "Tavily", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(provider, "Serper", StringComparison.OrdinalIgnoreCase);
+
+            // Bing / DuckDuckGo 使用公开接口：整块隐藏，而不是只禁用
+            WebSearchApiKeyPanel.Visibility = needsKey ? Visibility.Visible : Visibility.Collapsed;
+
+            if (WebSearchApiKeyHint != null && needsKey)
+            {
+                WebSearchApiKeyHint.Text = provider + " 需要 API Key；保存时按当前 Windows 用户加密落盘";
+            }
         }
 
         /// <summary>
@@ -828,6 +860,9 @@ namespace LangCode.Ui.ToolWindows
             }
 
             WriteOption((sender as FrameworkElement)?.Tag as string, ComboText(sender as ComboBox));
+
+            // 联网搜索提供商变化时，同步 Key 输入框的可用状态与提示
+            UpdateWebSearchKeyState();
             RaiseChanged();
         }
 
@@ -839,6 +874,17 @@ namespace LangCode.Ui.ToolWindows
             }
 
             WriteOption((sender as FrameworkElement)?.Tag as string, (sender as TextBox)?.Text);
+            RaiseChanged();
+        }
+
+        private void PasswordOption_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_binding || Settings == null)
+            {
+                return;
+            }
+
+            WriteOption((sender as FrameworkElement)?.Tag as string, (sender as PasswordBox)?.Password);
             RaiseChanged();
         }
 

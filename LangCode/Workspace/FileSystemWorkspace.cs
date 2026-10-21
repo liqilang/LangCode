@@ -504,6 +504,335 @@ namespace LangCode.Workspace
                 return Fail(ex.Message);
             }
         }
+
+        // ==================== 文档检索 ====================
+
+        /// <summary>
+        /// 默认参与文档检索的扩展名：只读「说明性文档」，不把源码 / 构建产物混进来
+        /// </summary>
+        private static readonly HashSet<string> DocumentationExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".md", ".mdx", ".markdown", ".txt", ".rst", ".adoc", ".asciidoc", ".html", ".htm",
+        };
+
+        /// <summary>
+        /// 把查询拆成词（按空白 / 常见中英文标点）
+        /// </summary>
+        private static readonly Regex DocTermRegex = new Regex(
+            "[^\\s,，。；;|、]+",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 一条文档命中（保留整份行数组，便于输出上下文）
+        /// </summary>
+        private sealed class DocHit
+        {
+            public string Path = string.Empty;
+            public int Line;
+            public double Score;
+            public string[] Lines;
+        }
+
+        /// <summary>
+        /// 在工作区文档（README / docs / *.md / *.txt 等）中按关键词检索，
+        /// 返回相关段落与行号。与 <see cref="SearchText"/> 的区别：
+        /// 只读说明性文档、按相关度排序、并附带上下文行，适合查「这个项目怎么用 / 为什么这么设计」。
+        /// </summary>
+        public ToolResult SearchDocuments(string query, string glob, int limit)
+        {
+            try
+            {
+                var text = (query ?? string.Empty).Trim();
+                if (text.Length == 0)
+                {
+                    return Fail("query 不能为空：请给出要查找的概念 / 关键词");
+                }
+
+                var terms = BuildDocTerms(text);
+                if (terms.Count == 0)
+                {
+                    return Fail("query 里没有可检索的词");
+                }
+
+                var maxHits = limit <= 0 ? 8 : Math.Min(limit, 30);
+                var fileRegex = string.IsNullOrWhiteSpace(glob) ? null : GlobToRegex(glob.Trim());
+                var hits = new List<DocHit>();
+
+                foreach (var file in EnumerateFilesCached(8))
+                {
+                    var relative = Relative(file);
+                    if (IsLikelyBinary(relative))
+                    {
+                        continue;
+                    }
+
+                    if (fileRegex != null ? !fileRegex.IsMatch(relative) : !IsDocumentationFile(relative))
+                    {
+                        continue;
+                    }
+
+                    string content;
+                    try
+                    {
+                        content = ReadTextCapped(file, out _);
+                    }
+                    catch (Exception)
+                    {
+                        continue;
+                    }
+
+                    var lines = content.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+                    var pathScore = ScoreDocPath(relative, terms, text);
+
+                    for (var i = 0; i < lines.Length; i++)
+                    {
+                        var score = ScoreDocLine(lines[i], terms, text);
+                        if (score <= 0)
+                        {
+                            continue;
+                        }
+
+                        // 标题行更可能是「这一节讲什么」，给一点额外权重
+                        if (lines[i].TrimStart().StartsWith("#", StringComparison.Ordinal))
+                        {
+                            score += 1.5;
+                        }
+
+                        hits.Add(new DocHit
+                        {
+                            Path = relative,
+                            Line = i + 1,
+                            Score = score + pathScore,
+                            Lines = lines,
+                        });
+                    }
+                }
+
+                if (hits.Count == 0)
+                {
+                    return Ok("没有在工作区文档里找到「" + text + "」相关的内容" +
+                              "（可换关键词，或把 glob 设为 * 扩大范围）");
+                }
+
+                // 同一文件最多保留 3 段最相关的命中，避免一个 README 把结果全占满
+                var ranked = hits
+                    .GroupBy(h => h.Path, StringComparer.OrdinalIgnoreCase)
+                    .SelectMany(g => g.OrderByDescending(h => h.Score).Take(3))
+                    .OrderByDescending(h => h.Score)
+                    .ThenBy(h => h.Path, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(h => h.Line)
+                    .Take(maxHits)
+                    .ToList();
+
+                var builder = new StringBuilder();
+                builder.Append("文档检索：「").Append(text).Append("」命中 ")
+                       .Append(ranked.Count).Append(" 段");
+                if (ranked.Count >= maxHits)
+                {
+                    builder.Append("（已达上限，可缩小关键词或指定 glob）");
+                }
+
+                builder.Append("：\n\n");
+
+                foreach (var hit in ranked)
+                {
+                    builder.Append("── ").Append(hit.Path).Append(':').Append(hit.Line)
+                           .Append("（相关度 ").Append(hit.Score.ToString("0.0")).Append("）\n");
+
+                    var from = Math.Max(0, hit.Line - 2);
+                    var to = Math.Min(hit.Lines.Length - 1, hit.Line);
+                    for (var i = from; i <= to; i++)
+                    {
+                        builder.Append(i == hit.Line - 1 ? "> " : "  ")
+                               .Append(ClipLine(hit.Lines[i])).Append('\n');
+                    }
+
+                    builder.Append('\n');
+                }
+
+                builder.Append("提示：需要完整上下文时用 read_file 读取对应文件与行号");
+                return Ok(builder.ToString().TrimEnd());
+            }
+            catch (Exception ex)
+            {
+                return Fail("文档检索失败：" + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 该路径是否属于「说明性文档」
+        /// </summary>
+        private static bool IsDocumentationFile(string relativePath)
+        {
+            var path = (relativePath ?? string.Empty).Replace('\\', '/');
+            var extension = Path.GetExtension(path);
+            if (!string.IsNullOrEmpty(extension) && DocumentationExtensions.Contains(extension))
+            {
+                return true;
+            }
+
+            var name = Path.GetFileName(path) ?? string.Empty;
+            if (name.Equals("README", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("CHANGELOG", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("CONTRIBUTING", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("AGENTS", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("LANGCODE", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("CLAUDE", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("CONVENTIONS", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals(".langcoderules", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals(".cursorrules", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals(".windsurfrules", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals(".clinerules", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // 放在 docs/ 下的文件即使扩展名不常见，也按文档处理
+            return path.StartsWith("docs/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 拆词：保留原词；中文长词额外补二元组，提升「上下文压缩」这类查询的召回
+        /// </summary>
+        private static List<string> BuildDocTerms(string query)
+        {
+            var result = new List<string>();
+
+            void Add(string value)
+            {
+                var term = (value ?? string.Empty).Trim();
+                if (term.Length == 0 || result.Contains(term, StringComparer.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                result.Add(term);
+            }
+
+            foreach (Match match in DocTermRegex.Matches(query ?? string.Empty))
+            {
+                Add(match.Value);
+            }
+
+            if (result.Count == 0)
+            {
+                Add(query);
+            }
+
+            foreach (var term in result.ToList())
+            {
+                if (term.Length < 4 || !ContainsCjk(term))
+                {
+                    continue;
+                }
+
+                for (var i = 0; i + 1 < term.Length && result.Count < 16; i++)
+                {
+                    Add(term.Substring(i, 2));
+                }
+            }
+
+            return result.Take(16).ToList();
+        }
+
+        private static bool ContainsCjk(string text)
+        {
+            foreach (var c in text ?? string.Empty)
+            {
+                if (c >= '\u4e00' && c <= '\u9fff')
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 一行命中的相关度：完整短语 > 多个独立词 > 单个词
+        /// </summary>
+        private static double ScoreDocLine(string line, IList<string> terms, string query)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return 0;
+            }
+
+            var score = 0.0;
+            if (line.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                score += 6;
+            }
+
+            var matched = 0;
+            foreach (var term in terms)
+            {
+                var count = CountDocOccurrences(line, term);
+                if (count == 0)
+                {
+                    continue;
+                }
+
+                matched++;
+                score += Math.Min(4, count) * 1.5;
+                if (line.TrimStart().StartsWith("#", StringComparison.Ordinal))
+                {
+                    score += 1.0;
+                }
+            }
+
+            if (matched > 1)
+            {
+                score += matched * 0.5;
+            }
+
+            return score;
+        }
+
+        /// <summary>
+        /// 路径命中加权：查「安装」时，docs/install.md 比正文里偶然出现一次更相关
+        /// </summary>
+        private static double ScoreDocPath(string path, IList<string> terms, string query)
+        {
+            var score = 0.0;
+            if (path.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                score += 4;
+            }
+
+            foreach (var term in terms)
+            {
+                if (path.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    score += 1.5;
+                }
+            }
+
+            return Math.Min(10, score);
+        }
+
+        private static int CountDocOccurrences(string text, string term)
+        {
+            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(term))
+            {
+                return 0;
+            }
+
+            var count = 0;
+            var index = 0;
+            while ((index = text.IndexOf(term, index, StringComparison.OrdinalIgnoreCase)) >= 0)
+            {
+                count++;
+                index += Math.Max(1, term.Length);
+                if (count >= 10)
+                {
+                    break;
+                }
+            }
+
+            return count;
+        }
+
         /// <summary>
         /// 搜索命中行的最大展示字符数：一行几万字符的压缩产物 / 生成代码会把整个结果撑爆
         /// </summary>

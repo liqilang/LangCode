@@ -51,6 +51,27 @@
                 <Setter Property="Margin"
                         Value="10,0,0,0"/>
             </Style>
+
+            <!-- 与 FieldControl 视觉对齐的密码框（PasswordBox 不能复用 TextBox 的 Style） -->
+            <Style x:Key="PasswordField"
+                   TargetType="PasswordBox">
+                <Setter Property="Height"
+                        Value="30"/>
+                <Setter Property="FontSize"
+                        Value="12.5"/>
+                <Setter Property="VerticalContentAlignment"
+                        Value="Center"/>
+                <Setter Property="Padding"
+                        Value="9,0"/>
+                <Setter Property="Foreground"
+                        Value="{DynamicResource Ap.FgBright}"/>
+                <Setter Property="Background"
+                        Value="{DynamicResource Ap.BgInput}"/>
+                <Setter Property="BorderBrush"
+                        Value="{DynamicResource Ap.BorderSoft}"/>
+                <Setter Property="BorderThickness"
+                        Value="1"/>
+            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
@@ -1184,6 +1205,103 @@
                                 <TextBlock Text="防止一次贴太多图片把上下文顶爆"
                                            Style="{StaticResource TdFieldHint}"
                                            Margin="0,5,0,0"/>
+                            </StackPanel>
+
+                            <!-- 网络搜索 / 文档检索 -->
+                            <StackPanel Margin="0,18,0,0">
+                                <TextBlock Text="网络搜索与文档检索"
+                                           Style="{StaticResource TdSectionTitle}"
+                                           Margin="0,0,0,9"/>
+                                <TextBlock Text="让 Agent 能查最新资料，也能在工作区 README / docs 中检索说明与设计决策"
+                                           Style="{StaticResource TdFieldHint}"
+                                           Margin="0,0,0,8"
+                                           TextWrapping="Wrap"/>
+
+                                <Grid Margin="0,6,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0"
+                                                Margin="0,0,10,0">
+                                        <TextBlock Text="联网搜索提供商"
+                                                   Style="{StaticResource TdFieldLabel}"/>
+                                        <TextBlock Text="Bing / DuckDuckGo 无需 Key；Brave / Tavily / Serper 需要填写 API Key"
+                                                   Style="{StaticResource TdFieldHint}"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <ComboBox Grid.Column="1"
+                                              Tag="WebSearchProvider"
+                                              MinWidth="150"
+                                              SelectionChanged="Option_Changed">
+                                        <ComboBoxItem Content="Bing"/>
+                                        <ComboBoxItem Content="DuckDuckGo"/>
+                                        <ComboBoxItem Content="Brave"/>
+                                        <ComboBoxItem Content="Tavily"/>
+                                        <ComboBoxItem Content="Serper"/>
+                                    </ComboBox>
+                                </Grid>
+
+                                <!--
+                                    只有 Brave / Tavily / Serper 需要 Key；
+                                    Bing / DuckDuckGo 时整块隐藏，避免用户误以为必填
+                                -->
+                                <StackPanel x:Name="WebSearchApiKeyPanel"
+                                            Margin="0,0,0,10"
+                                            Visibility="Collapsed">
+                                    <TextBlock Text="联网搜索 API Key"
+                                               Style="{StaticResource TdFieldLabel}"
+                                               Margin="0,0,0,5"/>
+                                    <PasswordBox x:Name="WebSearchApiKeyBox"
+                                                 Style="{StaticResource PasswordField}"
+                                                 Tag="WebSearchApiKey"
+                                                 PasswordChanged="PasswordOption_Changed"/>
+                                    <TextBlock x:Name="WebSearchApiKeyHint"
+                                               Text="Brave / Tavily / Serper 需要填写；保存时按当前 Windows 用户加密落盘"
+                                               Style="{StaticResource TdFieldHint}"
+                                               Margin="0,5,0,0"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+
+                                <StackPanel Margin="0,0,0,10">
+                                    <TextBlock Text="自定义搜索端点（可选）"
+                                               Style="{StaticResource TdFieldLabel}"
+                                               Margin="0,0,0,5"/>
+                                    <TextBox Style="{StaticResource FieldControl}"
+                                             Tag="WebSearchEndpoint"
+                                             TextChanged="TextOption_Changed"
+                                             Text=""/>
+                                    <TextBlock Text="留空使用内置地址；自建搜索网关时可填完整 URL"
+                                               Style="{StaticResource TdFieldHint}"
+                                               Margin="0,5,0,0"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="10"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="联网搜索默认条数"
+                                                   Style="{StaticResource TdFieldLabel}"
+                                                   Margin="0,0,0,5"/>
+                                        <TextBox Style="{StaticResource FieldControl}"
+                                                 Tag="WebSearchMaxResults"
+                                                 TextChanged="TextOption_Changed"
+                                                 Text="5"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="文档检索默认片段数"
+                                                   Style="{StaticResource TdFieldLabel}"
+                                                   Margin="0,0,0,5"/>
+                                        <TextBox Style="{StaticResource FieldControl}"
+                                                 Tag="DocSearchResults"
+                                                 TextChanged="TextOption_Changed"
+                                                 Text="8"/>
+                                    </StackPanel>
+                                </Grid>
                             </StackPanel>
 
                             <!-- 提示缓存：稳定前缀打 cache_control（Anthropic）/ 隐式缓存（OpenAI），重复前缀按折扣价计费 -->

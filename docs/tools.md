@@ -1,6 +1,6 @@
 # 工具参考
 
-> 本文列出 LangCode 暴露给模型的全部工具、参数、执行路径与审批类别。工具定义的唯一来源是 [`ToolCatalog.cs`](../LangCode/Agent/ToolCatalog.cs)，新增工具只需要改那一处，schema、系统提示词与审批映射会同步生成。
+> 本文列出 LangCode 暴露给模型的全部 26 个工具、参数、执行路径与审批类别。工具定义的唯一来源是 [`ToolCatalog.cs`](../LangCode/Agent/ToolCatalog.cs)，新增工具只需要改那一处，schema、系统提示词与审批映射会同步生成。
 >
 > 维护提示：新增 / 修改工具时，请同步更新本文的「工具总表」与「审批与安全」两节。
 
@@ -44,6 +44,7 @@
 | `list_symbols`         | 列出文件里的类 / 方法 / 函数及行号（C# 走 Roslyn，含签名） | `path`                           | Local | 读取     |
 | `find_references`      | 查找符号引用（Roslyn 标识符级，跳过字符串与注释）          | `symbol`、`glob`、`limit`        | Local | 读取     |
 | `semantic_search`      | 语义检索：按功能 / 概念找相关代码片段                      | `query`、`limit`                 | Local | 读取     |
+| `search_docs`          | 在工作区文档（README / docs / \*.md）中按关键词检索        | `query`、`glob`、`limit`         | Local | 读取     |
 | `get_type_hierarchy`   | 查类型的基类 / 接口 / 已知派生类型                         | `type`                           | Local | 读取     |
 | `find_implementations` | 查实现了某接口 / 继承了某基类的全部类型                    | `type`                           | Local | 读取     |
 
@@ -78,6 +79,7 @@
 | 工具             | 作用                                                                 | 主要参数                                       | 分派     | 审批类别 | 破坏性 |
 | ---------------- | -------------------------------------------------------------------- | ---------------------------------------------- | -------- | -------- | ------ |
 | `open_url`       | 用系统浏览器打开网页，可选抓取正文                                   | `url`、`fetch`                                 | External | 浏览器   | 是     |
+| `web_search`     | 联网搜索网页，返回标题 / URL / 摘要                                  | `query`、`limit`                               | External | 浏览器   | 是     |
 | `browser_action` | DevTools 自动化：导航 / 读正文 / 点击 / 填表 / 脚本 / 截图 / console | `action`、`url`、`selector`、`value`、`script` | External | 浏览器   | 是     |
 | `mcp_call`       | 调用已启用 MCP 服务器上的工具                                        | `server`、`tool`、`arguments`                  | External | MCP      | 是     |
 | `debug_inspect`  | 只读查看调试器                                                       | `action`、`expression`、`limit`                | External | 读取     | 否     |
@@ -307,6 +309,32 @@
 
 这些工具只在 Visual Studio 处于调试状态、且有活动栈帧时有效。
 
+### 4.12 `search_docs`
+
+```json
+{ "tool": "search_docs", "query": "上下文压缩", "limit": 8 }
+```
+
+- 只检索说明性文档：`README`、`docs/`、`*.md`、`*.mdx`、`*.txt`、`*.rst` 等；不会把源码或构建产物混进来。
+- 按相关度返回段落与行号；同一文件最多保留 3 段，避免一个 README 占满结果。
+- 适合回答「这个项目怎么用 / 为什么这么设计 / 某个配置在哪」；需要完整上下文时再用 `read_file`。
+- `glob` 可选，用来把范围缩到指定文档目录或文件。
+
+### 4.13 `web_search`
+
+```json
+{
+  "tool": "web_search",
+  "query": "Visual Studio 2022 VSIX HttpClient TLS 1.2",
+  "limit": 5
+}
+```
+
+- 默认使用 Bing RSS（无需 API Key）；如果当前网络环境可访问 DuckDuckGo，也可在设置里切换。
+- 可在 **设置 → 能力 → 网络搜索** 切换为 DuckDuckGo / Brave / Tavily / Serper；后三者中的 Brave / Tavily / Serper 需要填写 API Key。
+- 返回标题、URL 与摘要，不自动抓取正文；需要正文时再用 `open_url` 打开链接。
+- 搜索前会走审批（归入「浏览器操作」类别），确认卡上会显示实际查询词。
+
 ---
 
 ## 5. 长任务编排示例
@@ -353,11 +381,11 @@
 
 | 工具                                                                          | 默认是否需要用户确认 |
 | ----------------------------------------------------------------------------- | -------------------- |
-| 只读工具（读 / 搜 / 符号 / 语义 / 类型 / 调试查看）                           | 否                   |
+| 只读工具（读 / 搜 / 符号 / 语义 / 文档 / 类型 / 调试查看）                    | 否                   |
 | `write_file` / `replace_in_file` / `edit_symbol`                              | 是                   |
 | `apply_patch` / `rename_symbol`                                               | 是（逐节 / 逐文件）  |
 | `run_command` / `run_tests` / `debug_control`                                 | 是                   |
-| `open_url` / `browser_action`                                                 | 是                   |
+| `open_url` / `web_search` / `browser_action`                                  | 是                   |
 | `mcp_call`                                                                    | 是                   |
 | `update_todo_list` / `ask_followup_question` / `new_task` / `goto_definition` | 否                   |
 
@@ -371,6 +399,8 @@
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | 定义 / schema / 提示词 / 审批类别 | [`ToolCatalog.cs`](../LangCode/Agent/ToolCatalog.cs)                                                                                         |
 | 动作解析与格式化                  | [`ToolProtocol.cs`](../LangCode/Agent/ToolProtocol.cs)                                                                                       |
+| 文档检索                          | [`FileSystemWorkspace.cs`](../LangCode/Workspace/FileSystemWorkspace.cs)                                                                     |
+| 联网搜索                          | [`WebSearchTool.cs`](../LangCode/Workspace/WebSearchTool.cs)                                                                                 |
 | 本地只读与写准备                  | [`AgentRunner.Dispatch.cs`](../LangCode/Agent/AgentRunner.Dispatch.cs)                                                                       |
 | 编排类工具                        | [`AgentRunner.Orchestration.cs`](../LangCode/Agent/AgentRunner.Orchestration.cs)                                                             |
 | 外部副作用工具                    | [`AgentRunner.External.cs`](../LangCode/Agent/AgentRunner.External.cs)                                                                       |

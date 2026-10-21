@@ -238,7 +238,8 @@ namespace LangCode.Agent
         private static readonly HashSet<string> DedupTools = new(StringComparer.OrdinalIgnoreCase)
         {
             "read_file", "list_files", "search_text", "list_symbols",
-            "find_references", "semantic_search", "get_type_hierarchy", "find_implementations",
+            "find_references", "semantic_search", "search_docs",
+            "get_type_hierarchy", "find_implementations",
         };
 
         /// <summary>
@@ -269,6 +270,11 @@ namespace LangCode.Agent
         /// 浏览器自动化（DevTools 协议：点击 / 填表 / 截图 …）
         /// </summary>
         private readonly BrowserAutomation _browserAutomation;
+
+        /// <summary>
+        /// 联网搜索（DuckDuckGo / Bing / Brave / Tavily / Serper）
+        /// </summary>
+        private readonly WebSearchTool _webSearch;
 
         /// <summary>
         /// 本地代码库语义索引（RAG）
@@ -310,6 +316,13 @@ namespace LangCode.Agent
                 Headless = settings?.BrowserHeadless ?? true,
                 ExecutablePath = settings?.BrowserExecutablePath ?? string.Empty,
                 TimeoutSeconds = settings?.BrowserTimeoutSeconds ?? 30,
+            };
+            _webSearch = new WebSearchTool
+            {
+                Provider = settings?.WebSearchProvider ?? "Bing",
+                ApiKey = settings?.WebSearchApiKey ?? string.Empty,
+                Endpoint = settings?.WebSearchEndpoint ?? string.Empty,
+                MaxResults = settings?.WebSearchMaxResults ?? 5,
             };
             _index = sharedIndex ?? new SemanticIndex(root)
             {

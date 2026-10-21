@@ -8,7 +8,7 @@
 | ---------------------------------- | ------------------- | ----------------------------------------------------------------------------------------- |
 | [安装与分发](install.md)           | 使用者              | 下载、安装、升级、卸载、首次配置与常见问题                                                |
 | [AI 与自动化能力总览](ai-agent.md) | 使用者 / 二次开发者 | Agent 循环、子任务、任务清单、主动提问、计划模式、自动验证/修复、上下文与成本、安全与回退 |
-| [工具参考](tools.md)               | 使用者 / 二次开发者 | 全部 24 个工具的参数、审批类别、破坏性标记、调用协议与示例                                |
+| [工具参考](tools.md)               | 使用者 / 二次开发者 | 全部 26 个工具的参数、审批类别、破坏性标记、调用协议与示例                                |
 | [项目 README](../README.md)        | 第一次接触项目的人  | 下载安装、快速开始、界面截图、模型支持、项目结构                                          |
 
 ## 先认识几个词
@@ -45,7 +45,8 @@ Agent 循环（AgentRunner）
    ├─ 代码理解
    │    ├─ list_files / read_file / search_text
    │    ├─ list_symbols / find_references
-   │    └─ semantic_search / 类型层次 / 查找实现
+   │    ├─ semantic_search / search_docs
+   │    └─ 类型层次 / 查找实现
    │
    ├─ 代码修改
    │    ├─ replace_in_file / write_file
@@ -59,7 +60,7 @@ Agent 循环（AgentRunner）
    │    └─ 自动修复（读编译诊断，最多 N 轮）
    │
    └─ 外部能力
-        ├─ open_url / browser_action
+        ├─ web_search / open_url / browser_action
         ├─ mcp_call
         └─ debug_inspect / debug_control
 ```
