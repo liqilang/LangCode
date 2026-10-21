@@ -6,15 +6,12 @@
 
 <p><strong>Visual Studio 里的 AI 编程助手</strong></p>
 
-<p>读懂项目 · 修改代码 · 运行命令与测试 · 联网搜索 · 调试器联动 · MCP 扩展<br />
-每一次改动文件之前，都会先给你看差异，确认之后才落盘。</p>
+<a href="https://gitee.com/li_qi_lang/lang-code"><img src="https://gitee.com/li_qi_lang/lang-code/badge/star.svg?theme=white" alt="Gitee Star" /></a>
+<a href="https://gitee.com/li_qi_lang/lang-code"><img src="https://gitee.com/li_qi_lang/lang-code/badge/fork.svg?theme=white" alt="Gitee Fork" /></a>
+<img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" />
+<img src="https://img.shields.io/badge/Visual%20Studio-2022%20(17.0%2B)-5C2D91.svg" alt="Visual Studio" />
+<img src="https://img.shields.io/badge/.NET%20Framework-4.7.2-512BD4.svg" alt=".NET Framework" />
 
-<p>
-  <a href="https://gitee.com/li_qi_lang/lang-code"><img src="https://gitee.com/li_qi_lang/lang-code/badge/star.svg?theme=white" alt="Gitee Star" /></a>
-  <a href="https://gitee.com/li_qi_lang/lang-code"><img src="https://gitee.com/li_qi_lang/lang-code/badge/fork.svg?theme=white" alt="Gitee Fork" /></a>
-  <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" />
-  <img src="https://img.shields.io/badge/Visual%20Studio-2022%20(17.0%2B)-5C2D91.svg" alt="Visual Studio" />
-  <img src="https://img.shields.io/badge/.NET%20Framework-4.7.2-512BD4.svg" alt=".NET Framework" />
 </p>
 
 <p>
