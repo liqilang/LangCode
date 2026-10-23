@@ -764,9 +764,12 @@ namespace LangCode.Ui.ToolWindows
                 var card = new ChatBlock
                 {
                     Kind = ChatBlockKind.DiffCard,
-                    Title = edit.IsNewFile ? "新增文件" : "编辑文件",
+                    Title = EditCardTitle(edit),
                     Path = edit.RelativePath,
                     Lines = edit.Diff,
+
+                    // 移动没有行级 diff：用一段文字说明源 / 目标，审批区才不会空着
+                    Text = edit.IsMove ? "移动 " + edit.RelativePath + " → " + edit.MoveToPath : null,
 
                     // 点卡片直接在 VS 里开差异对比：记住改动前后全文，
                     // 待审批时看的是「提议的内容」（此时磁盘上还没有改动）

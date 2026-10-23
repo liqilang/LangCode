@@ -85,6 +85,30 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
+            // 移动：跟随到目标位置（源文件已经不存在）
+            if (edit.IsMove)
+            {
+                var target = ResolveInRootAllowMissing(edit.MoveToPath);
+                if (target != null)
+                {
+                    VsFileOpener.TryOpenFile(target, 0);
+                }
+
+                return;
+            }
+
+            // 删除：磁盘上已经没有这个文件，用「原文 vs 空」的差异对比呈现
+            if (edit.IsDelete)
+            {
+                var deleted = ResolveInRootAllowMissing(edit.RelativePath);
+                if (deleted != null)
+                {
+                    VsFileOpener.TryOpenDiffContents(edit.OriginalText ?? string.Empty, string.Empty, deleted);
+                }
+
+                return;
+            }
+
             var absolute = ResolveInRoot(edit.RelativePath);
             if (absolute != null)
             {
@@ -190,7 +214,8 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
-            var absolute = ResolveInRoot(change.Path);
+            // 允许不存在：删除的文件在磁盘上已经没有了，但仍然要能打开差异对比
+            var absolute = ResolveInRootAllowMissing(change.Path);
             if (absolute == null)
             {
                 return;
@@ -198,9 +223,11 @@ namespace LangCode.Ui.ToolWindows
 
             e.Handled = true;
 
-            // ① 优先用本次会话抓到的「改动前」内容开差异对比
+            // ① 优先用本次会话抓到的「改动前」内容开差异对比；
+            //    TryOpenDiff 只对存在的文件生效，删除的文件退回到「改动前 vs 空」的内存差异
             if (_sessionBaselines.TryGetValue(change.Path, out var baseline) &&
-                VsFileOpener.TryOpenDiff(baseline, absolute))
+                (VsFileOpener.TryOpenDiff(baseline, absolute) ||
+                 VsFileOpener.TryOpenDiffContents(baseline, string.Empty, absolute)))
             {
                 return;
             }

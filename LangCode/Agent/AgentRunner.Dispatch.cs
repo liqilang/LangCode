@@ -184,6 +184,12 @@ namespace LangCode.Agent
                 case "read_file":
                     return _workspace.ReadFile(action.Get("path"), ParseInt(action.Get("start_line")), ParseInt(action.Get("end_line")));
 
+                case "read_multiple_files":
+                    return _workspace.ReadMultipleFiles(action.Get("paths"), ParseInt(action.Get("max_chars_each")));
+
+                case "list_dir":
+                    return _workspace.ListDirectory(action.Get("path"), ParseInt(action.Get("depth")));
+
                 case "search_text":
                     return _workspace.SearchText(action.Get("pattern"), action.Get("glob"));
 
@@ -277,6 +283,12 @@ namespace LangCode.Agent
                         action.Get("new_text"),
                         ParseBool(action.Get("replace_all")));
 
+                case "delete_file":
+                    return _workspace.PrepareDelete(action.Get("path"));
+
+                case "move_file":
+                    return _workspace.PrepareMove(action.Get("from"), action.Get("to"));
+
                 default:
                     return new ToolResult { Ok = false, Output = "✗ 未知工具：" + action.Name };
             }
@@ -330,8 +342,8 @@ namespace LangCode.Agent
             var parts = new List<string>();
             foreach (var key in new[]
             {
-                "path", "command", "url", "pattern", "query", "symbol", "type",
-                "action", "server", "tool", "glob",
+                "path", "from", "to", "paths", "command", "url", "pattern", "query",
+                "symbol", "type", "action", "server", "tool", "glob",
             })
             {
                 var value = action.Get(key);

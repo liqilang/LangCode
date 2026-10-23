@@ -926,15 +926,23 @@ namespace LangCode.Agent
                 return null;
             }
 
-            if (!callbacks.IsFileDirty(pending.RelativePath))
+            // 移动还要检查目标位置：目标若正被编辑器打开且未保存，同样不应被覆盖
+            var dirty = callbacks.IsFileDirty(pending.RelativePath) ||
+                        (pending.IsMove && callbacks.IsFileDirty(pending.MoveToPath));
+
+            if (!dirty)
             {
                 return null;
             }
 
+            var target = pending.IsMove
+                ? pending.RelativePath + " → " + pending.MoveToPath
+                : pending.RelativePath;
+
             return new ToolResult
             {
                 Ok = false,
-                Output = "文件在 Visual Studio 编辑器中还有未保存的改动，已拒绝直接写盘。" + "请先保存（Ctrl+S）后再让我重试；这样不会覆盖你正在编辑的内容：" + pending.RelativePath,
+                Output = "文件在 Visual Studio 编辑器中还有未保存的改动，已拒绝直接写盘。" + "请先保存（Ctrl+S）后再让我重试；这样不会覆盖你正在编辑的内容：" + target,
             };
         }
 

@@ -1,6 +1,6 @@
 # 工具参考
 
-> 本文列出 LangCode 暴露给模型的全部 26 个工具、参数、执行路径与审批类别。工具定义的唯一来源是 [`ToolCatalog.cs`](../LangCode/Agent/ToolCatalog.cs)，新增工具只需要改那一处，schema、系统提示词与审批映射会同步生成。
+> 本文列出 LangCode 暴露给模型的全部 30 个工具、参数、执行路径与审批类别。工具定义的唯一来源是 [`ToolCatalog.cs`](../LangCode/Agent/ToolCatalog.cs)，新增工具只需要改那一处，schema、系统提示词与审批映射会同步生成。
 >
 > 维护提示：新增 / 修改工具时，请同步更新本文的「工具总表」与「审批与安全」两节。
 
@@ -39,7 +39,9 @@
 | 工具                   | 作用                                                       | 主要参数                         | 分派  | 审批类别 |
 | ---------------------- | ---------------------------------------------------------- | -------------------------------- | ----- | -------- |
 | `list_files`           | 列出工作区文件，支持 `*` / `?` 通配                        | `glob`                           | Local | 读取     |
+| `list_dir`             | 树形列出目录内容（目录带 `/` 后缀，支持递归深度）          | `path`、`depth`                  | Local | 读取     |
 | `read_file`            | 读取文件内容，可按起止行裁剪                               | `path`、`start_line`、`end_line` | Local | 读取     |
+| `read_multiple_files`  | 一次读取多个文件（带行号，适合同时看几个相关文件）         | `paths`、`max_chars_each`        | Local | 读取     |
 | `search_text`          | 按正则搜索文件内容，返回 `路径:行号: 内容`                 | `pattern`、`glob`                | Local | 读取     |
 | `list_symbols`         | 列出文件里的类 / 方法 / 函数及行号（C# 走 Roslyn，含签名） | `path`                           | Local | 读取     |
 | `find_references`      | 查找符号引用（Roslyn 标识符级，跳过字符串与注释）          | `symbol`、`glob`、`limit`        | Local | 读取     |
@@ -54,6 +56,8 @@
 | ----------------- | -------------------------------------------------- | --------------------------------------------- | ------------- | -------------------------------- | ------ |
 | `replace_in_file` | 局部替换；`old_text` 必须在文件里唯一              | `path`、`old_text`、`new_text`、`replace_all` | Local         | 编辑                             | 是     |
 | `write_file`      | 整文件写入（新建或整体重写）                       | `path`、`content`                             | Local         | 新增（覆盖已有文件时按编辑审批） | 是     |
+| `delete_file`     | 删除一个文件（先出「删除文件」差异卡）             | `path`                                        | Local         | 编辑                             | 是     |
+| `move_file`       | 移动 / 重命名文件（目标已存在时拒绝）              | `from`、`to`                                  | Local         | 编辑                             | 是     |
 | `edit_symbol`     | 按符号名定位代码块再改写，比字符串匹配更抗格式漂移 | `path`、`symbol`、`mode`、`new_text`          | Local         | 编辑                             | 是     |
 | `apply_patch`     | 多文件补丁：一次改多处 / 跨文件重构                | `patches`                                     | Orchestration | 编辑（逐节审批）                 | 是     |
 | `rename_symbol`   | 跨文件重命名（Roslyn 语义级）                      | `symbol`、`new_name`、`glob`                  | Orchestration | 编辑（逐文件审批）               | 是     |
@@ -335,6 +339,50 @@
 - 返回标题、URL 与摘要，不自动抓取正文；需要正文时再用 `open_url` 打开链接。
 - 搜索前会走审批（归入「浏览器操作」类别），确认卡上会显示实际查询词。
 
+### 4.14 `read_multiple_files`
+
+```json
+{
+  "tool": "read_multiple_files",
+  "paths": "src/App.tsx\nsrc/theme.ts",
+  "max_chars_each": 6000
+}
+```
+
+- 一次最多读 20 个文件，单文件默认 8000 字符、上限 20000，总输出上限约 60000 字符。
+- `paths` 用换行或分号分隔；也容忍模型误写成 `["a","b"]` 的 JSON 数组形式。
+- 适合「同时看几个相关文件」；需要精读某一段时仍用 `read_file` + 行范围。
+
+### 4.15 `list_dir`
+
+```json
+{ "tool": "list_dir", "path": "src", "depth": 2 }
+```
+
+- `path` 省略或写 `.` 表示工作区根；`depth` 默认 1，最大 4。
+- 目录名带 `/` 后缀，目录优先、按名称排序；条目超过 1000 会截断。
+- 自动跳过 `bin` / `obj` / `node_modules` 等忽略目录，并尊重 `.gitignore`。
+
+### 4.16 `delete_file`
+
+```json
+{ "tool": "delete_file", "path": "src/Old.tsx" }
+```
+
+- 只删除文件，不删除目录；审批卡会以「删除文件」显示完整删除 diff。
+- 落盘前做乐观并发校验：审批期间文件被改动过会拒绝删除。
+- 删除后可用「撤销上一步 / 撤销本轮」按原编码还原。
+
+### 4.17 `move_file`
+
+```json
+{ "tool": "move_file", "from": "src/Old.tsx", "to": "src/new/Old.tsx" }
+```
+
+- 只移动文件本身，**不会**自动更新 import / 引用；C# 符号重命名请用 `rename_symbol`。
+- 目标已存在（文件或目录）时拒绝；目标目录会自动创建。
+- 撤销时会检查目标文件在移动后是否被修改过，避免覆盖新内容。
+
 ---
 
 ## 5. 长任务编排示例
@@ -383,6 +431,7 @@
 | ----------------------------------------------------------------------------- | -------------------- |
 | 只读工具（读 / 搜 / 符号 / 语义 / 文档 / 类型 / 调试查看）                    | 否                   |
 | `write_file` / `replace_in_file` / `edit_symbol`                              | 是                   |
+| `delete_file` / `move_file`                                                   | 是                   |
 | `apply_patch` / `rename_symbol`                                               | 是（逐节 / 逐文件）  |
 | `run_command` / `run_tests` / `debug_control`                                 | 是                   |
 | `open_url` / `web_search` / `browser_action`                                  | 是                   |

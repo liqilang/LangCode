@@ -169,6 +169,18 @@ namespace LangCode.Agent
 
             new ToolDescriptor("web_search", "联网搜索网页（默认 Bing，可配置 DuckDuckGo / Brave / Tavily / Serper），返回标题、URL 与摘要", "{\"query\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\"}}", "[\"query\"]", ToolDispatch.External, true, ApprovalCatalog.Browser, 26,
                 "联网搜索（需要最新信息 / 外部文档 / 排错线索时用）：{\"tool\":\"web_search\",\"query\":\"Visual Studio 2022 VSIX net472 HttpClient TLS1.2\",\"limit\":5}\n   · 返回标题、URL 与摘要；需要正文时再用 open_url 打开链接\n   · 默认 Bing 免 Key，可在「设置 → 能力 → 网络搜索」切换提供商"),
+
+            new ToolDescriptor("list_dir", "列出目录内容（树形，目录带 / 后缀；支持递归深度）", "{\"path\":{\"type\":\"string\"},\"depth\":{\"type\":\"integer\",\"description\":\"递归深度 1-4，默认 1\"}}", "[]", ToolDispatch.Local, false, ApprovalCatalog.Read, 27,
+                "列目录（树形）：{\"tool\":\"list_dir\",\"path\":\"src\",\"depth\":2}\n   · path 省略 = 工作区根；depth 默认 1（只看一层），最大 4\n   · 目录带 / 后缀；会自动跳过 bin / obj / node_modules 等忽略目录，并尊重 .gitignore"),
+
+            new ToolDescriptor("read_multiple_files", "一次读取多个文件（带行号），适合同时看几个相关文件", "{\"paths\":{\"type\":\"string\",\"description\":\"多个相对路径，用换行或分号分隔\"},\"max_chars_each\":{\"type\":\"integer\",\"description\":\"单文件字符上限，默认 8000，最大 20000\"}}", "[\"paths\"]", ToolDispatch.Local, false, ApprovalCatalog.Read, 28,
+                "批量读文件：{\"tool\":\"read_multiple_files\",\"paths\":\"src/A.ts\\nsrc/B.ts\"}\n   · paths 用换行或分号分隔（最多 20 个）；每个文件默认最多 8000 字符\n   · 多个文件互不依赖时优先用它，比连续发多个 read_file 更省往返"),
+
+            new ToolDescriptor("delete_file", "删除工作区里的一个文件（需审批，可撤销）", "{\"path\":{\"type\":\"string\"}}", "[\"path\"]", ToolDispatch.Local, true, ApprovalCatalog.Edit, 29,
+                "删除文件：{\"tool\":\"delete_file\",\"path\":\"src/Old.tsx\"}\n   · 只删文件、不删目录；落盘前会出「删除文件」差异卡等你确认\n   · 删除前先确认没有引用（可先用 find_references）；删除后可用「撤销修改」还原"),
+
+            new ToolDescriptor("move_file", "移动或重命名文件（需审批；不会自动改引用）", "{\"from\":{\"type\":\"string\"},\"to\":{\"type\":\"string\"}}", "[\"from\",\"to\"]", ToolDispatch.Local, true, ApprovalCatalog.Edit, 30,
+                "移动 / 重命名文件：{\"tool\":\"move_file\",\"from\":\"src/Old.tsx\",\"to\":\"src/new/Old.tsx\"}\n   · 目标已存在时拒绝覆盖；目标目录会自动创建；落盘前会出确认卡\n   · 只移动文件本身，不会自动更新 import / 引用；C# 符号重命名请用 rename_symbol"),
         ];
 
         // 工具名 → 描述符（大小写不敏感；模型偶尔会改动大小写）

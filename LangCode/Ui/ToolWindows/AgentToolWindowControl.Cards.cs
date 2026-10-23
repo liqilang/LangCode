@@ -71,7 +71,7 @@ namespace LangCode.Ui.ToolWindows
             // 但**失败**（例如 old_text 不唯一）确实需要一条痕迹 —— 除非刚才那张审批卡
             // 已经写明结论（已拒绝），那就没必要再补一条失败提示
             if (IsEditTool(action.Name) &&
-                (result.Ok || HasDecidedDiffCard(message, ToolPath(action))))
+                (result.Ok || HasDecidedDiffCard(message, EditPathOf(action))))
             {
                 return;
             }
@@ -120,6 +120,8 @@ namespace LangCode.Ui.ToolWindows
             // 它们往往很长（整串目录、一堆匹配行），摊开会把对话主线挤走；
             // 需要看的时候点一下箭头展开即可其它工具结果仍遵循「长文默认折叠」设置
             var isBrowsing = action.Name == "list_files"
+                || action.Name == "list_dir"
+                || action.Name == "read_multiple_files"
                 || action.Name == "search_text"
                 || action.Name == "semantic_search"
                 || action.Name == "list_symbols"
@@ -491,10 +493,48 @@ namespace LangCode.Ui.ToolWindows
                 case "edit_symbol":
                 case "apply_patch":
                 case "rename_symbol":
+                case "delete_file":
+                case "move_file":
                     return true;
                 default:
                     return false;
             }
+        }
+
+        /// <summary>
+        /// 改动类工具在对话里关联的「被改文件」路径（移动用源路径，与差异卡的 Path 一致）
+        /// </summary>
+        private static string EditPathOf(ToolAction action)
+        {
+            if (action == null)
+            {
+                return string.Empty;
+            }
+
+            return action.Name == "move_file" ? action.Get("from") : action.Get("path");
+        }
+
+        /// <summary>
+        /// 差异卡标题：区分新增 / 编辑 / 删除 / 移动
+        /// </summary>
+        private static string EditCardTitle(PendingEdit edit)
+        {
+            if (edit == null)
+            {
+                return "编辑文件";
+            }
+
+            if (edit.IsDelete)
+            {
+                return "删除文件";
+            }
+
+            if (edit.IsMove)
+            {
+                return "移动文件 → " + edit.MoveToPath;
+            }
+
+            return edit.IsNewFile ? "新增文件" : "编辑文件";
         }
 
         /// <summary>
@@ -548,9 +588,10 @@ namespace LangCode.Ui.ToolWindows
             assistant.Blocks.Add(new ChatBlock
             {
                 Kind = ChatBlockKind.DiffCard,
-                Title = edit.IsNewFile ? "新增文件" : "编辑文件",
+                Title = EditCardTitle(edit),
                 Path = edit.RelativePath,
                 Lines = edit.Diff,
+                Text = edit.IsMove ? "移动 " + edit.RelativePath + " → " + edit.MoveToPath : null,
                 IsAccepted = true,
                 StatusText = "已应用",
                 IsBodyVisible = false,
@@ -567,10 +608,14 @@ namespace LangCode.Ui.ToolWindows
             switch (toolName)
             {
                 case "list_files": return "列目录";
+                case "list_dir": return "目录树";
                 case "read_file": return "读文件";
+                case "read_multiple_files": return "批量读文件";
                 case "search_text": return "搜索";
                 case "write_file": return "新增文件";
                 case "replace_in_file": return "编辑文件";
+                case "delete_file": return "删除文件";
+                case "move_file": return "移动文件";
                 case "run_command": return "运行命令";
                 case "open_url": return "打开链接";
                 case "mcp_call": return "MCP 调用";
@@ -596,6 +641,25 @@ namespace LangCode.Ui.ToolWindows
             if (action == null)
             {
                 return string.Empty;
+            }
+
+            // 移动：副标题显示「源 → 目标」，比单独一个路径更能说明这次调用做了什么
+            if (action.Name == "move_file")
+            {
+                var moveFrom = action.Get("from");
+                var moveTo = action.Get("to");
+                if (!string.IsNullOrWhiteSpace(moveFrom))
+                {
+                    return moveFrom + (string.IsNullOrWhiteSpace(moveTo) ? string.Empty : " → " + moveTo);
+                }
+            }
+
+            // 批量读取：副标题显示文件数量，具体路径在展开的正文里
+            if (action.Name == "read_multiple_files")
+            {
+                var paths = action.Get("paths") ?? string.Empty;
+                var count = paths.Split(new[] { '\n', '\r', ';', ',', '|' }, StringSplitOptions.RemoveEmptyEntries).Length;
+                return count > 0 ? count + " 个文件" : string.Empty;
             }
 
             var path = action.Get("path");

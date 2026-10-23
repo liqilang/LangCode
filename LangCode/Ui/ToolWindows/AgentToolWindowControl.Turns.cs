@@ -373,11 +373,34 @@ namespace LangCode.Ui.ToolWindows
 
                             // 「本次变更」摘要：把这一次真正落盘的改动按文件累计下来
                             //（增删行数取自 diff 行），会话结束时一眼看清动过哪些文件
-                            _session.RecordChange(
-                                edit.IsNewFile ? SessionChangeKind.Add : SessionChangeKind.Modify,
-                                edit.RelativePath,
-                                edit.Diff.Count(line => line.Kind == DiffLineKind.Add),
-                                edit.Diff.Count(line => line.Kind == DiffLineKind.Delete));
+                            var addedLines = edit.Diff.Count(line => line.Kind == DiffLineKind.Add);
+                            var deletedLines = edit.Diff.Count(line => line.Kind == DiffLineKind.Delete);
+
+                            if (edit.IsDelete)
+                            {
+                                _session.RecordChange(SessionChangeKind.Delete, edit.RelativePath, 0, deletedLines);
+                            }
+                            else if (edit.IsMove)
+                            {
+                                // 移动在摘要里体现为「旧路径删除 + 新路径新增」
+                                _session.RecordChange(SessionChangeKind.Delete, edit.RelativePath, 0, deletedLines);
+                                _session.RecordChange(SessionChangeKind.Add, edit.MoveToPath, addedLines, 0);
+
+                                if (!string.IsNullOrWhiteSpace(edit.MoveToPath) &&
+                                    !_sessionBaselines.ContainsKey(edit.MoveToPath))
+                                {
+                                    // 新路径此前不存在：以空内容作基线，点摘要即可看到「从无到有」的差异
+                                    _sessionBaselines[edit.MoveToPath] = string.Empty;
+                                }
+                            }
+                            else
+                            {
+                                _session.RecordChange(
+                                    edit.IsNewFile ? SessionChangeKind.Add : SessionChangeKind.Modify,
+                                    edit.RelativePath,
+                                    addedLines,
+                                    deletedLines);
+                            }
 
                             // 新建 / 删除文件后 @ 提及索引与工具链探测缓存要失效
                             _mentions?.Invalidate();

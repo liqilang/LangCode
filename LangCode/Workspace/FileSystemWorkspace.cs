@@ -28,6 +28,37 @@ namespace LangCode.Workspace
         /// 是否已经落盘（审批通过后置位）
         /// </summary>
         public bool Applied { get; set; }
+
+        /// <summary>
+        /// 是否为「删除文件」：审批通过后删除 <see cref="RelativePath"/>，
+        /// 撤销时用 <see cref="OriginalText"/> 还原
+        /// </summary>
+        public bool IsDelete { get; set; }
+
+        /// <summary>
+        /// 移动 / 重命名的目标相对路径（空 = 本次不是移动）
+        /// </summary>
+        public string MoveToPath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 原文件的编码（删除后撤销时按原编码写回；其它操作可留空）
+        /// </summary>
+        public Encoding OriginalEncoding { get; set; }
+
+        /// <summary>
+        /// 原文件是否带 BOM（删除后撤销时使用）
+        /// </summary>
+        public bool OriginalHadBom { get; set; }
+
+        /// <summary>
+        /// 原文件是否使用 CRLF（删除后撤销时使用）
+        /// </summary>
+        public bool OriginalUsedCrLf { get; set; }
+
+        /// <summary>
+        /// 是否是一次移动操作
+        /// </summary>
+        public bool IsMove => !string.IsNullOrWhiteSpace(MoveToPath);
     }
 
     /// <summary>
@@ -441,6 +472,226 @@ namespace LangCode.Workspace
             {
                 return Fail(ex.Message);
             }
+        }
+
+        /// <summary>
+        /// 批量读取多个文件：一次返回多个文件的内容（带行号），
+        /// 减少模型连续发多个 read_file 的往返次数
+        /// </summary>
+        public ToolResult ReadMultipleFiles(string pathsText, int? maxCharsEach = null)
+        {
+            var paths = SplitPaths(pathsText);
+            if (paths.Count == 0)
+            {
+                return Fail("paths 不能为空：多个路径用换行或分号分隔");
+            }
+
+            const int MaxFiles = 20;
+            if (paths.Count > MaxFiles)
+            {
+                paths = paths.GetRange(0, MaxFiles);
+            }
+
+            // 单文件上限：默认 8000，范围 500~20000；总量再加一道上限，避免一次把上下文吃满
+            var perFile = Math.Min(Math.Max(maxCharsEach ?? 8000, 500), 20000);
+            const int TotalBudget = 60000;
+
+            var builder = new StringBuilder();
+            var okCount = 0;
+            var failed = 0;
+
+            foreach (var path in paths)
+            {
+                if (builder.Length >= TotalBudget)
+                {
+                    builder.Append("\n…（已达到本次批量读取的总量上限 ").Append(TotalBudget)
+                        .Append(" 字符，剩余文件未读取；需要时请再单独读取）\n");
+                    break;
+                }
+
+                builder.Append("=== ").Append(path).Append(" ===\n");
+
+                if (IsLikelyBinary(path))
+                {
+                    builder.Append("（二进制文件，已跳过）\n\n");
+                    failed++;
+                    continue;
+                }
+
+                var result = ReadFile(path, 1, null);
+                if (!result.Ok)
+                {
+                    builder.Append(result.Output).Append("\n\n");
+                    failed++;
+                    continue;
+                }
+
+                var text = result.Output ?? string.Empty;
+                if (text.Length > perFile)
+                {
+                    text = text.Substring(0, perFile) +
+                           "\n…（单文件超过 " + perFile + " 字符，已截断；需要完整内容请单独 read_file 并指定行范围）";
+                }
+
+                builder.Append(text.TrimEnd()).Append("\n\n");
+                okCount++;
+            }
+
+            if (okCount == 0)
+            {
+                return Fail(builder.ToString().Trim());
+            }
+
+            return new ToolResult
+            {
+                Ok = true,
+                Output = builder.ToString().TrimEnd() +
+                         (failed == 0 ? string.Empty : "\n\n（其中 " + failed + " 个文件未能读取，原因见上）"),
+            };
+        }
+
+        /// <summary>
+        /// 列出目录内容（树形，目录带 / 后缀）；depth 默认 1，最大 4
+        /// </summary>
+        public ToolResult ListDirectory(string relativePath, int? depth = null)
+        {
+            try
+            {
+                var target = string.IsNullOrWhiteSpace(relativePath) || relativePath.Trim() == "."
+                    ? _root
+                    : ResolveWithinRoot(relativePath);
+
+                if (!Directory.Exists(target))
+                {
+                    return File.Exists(target)
+                        ? Fail("这是一个文件，不是目录：" + relativePath + "（读内容请用 read_file）")
+                        : Fail("目录不存在：" + relativePath);
+                }
+
+                var levels = Math.Min(Math.Max(depth ?? 1, 1), 4);
+                var builder = new StringBuilder();
+                var entries = 0;
+                const int MaxEntries = 1000;
+
+                builder.Append(string.IsNullOrWhiteSpace(relativePath) ? "." : relativePath.TrimEnd('/', '\\'))
+                    .Append("/\n");
+
+                WalkDirectory(target, 1, levels, builder, ref entries, MaxEntries);
+
+                if (entries >= MaxEntries)
+                {
+                    builder.Append("…（条目超过 ").Append(MaxEntries)
+                        .Append(" 个，已截断；请缩小 path 或用 list_files 精确匹配）\n");
+                }
+
+                return Ok(builder.ToString());
+            }
+            catch (Exception ex)
+            {
+                return Fail(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 递归列出目录（目录优先、按名称排序，跳过忽略目录 / 忽略文件）
+        /// </summary>
+        private void WalkDirectory(string directory, int level, int maxLevel, StringBuilder builder, ref int entries, int maxEntries)
+        {
+            if (level > maxLevel || entries >= maxEntries)
+            {
+                return;
+            }
+
+            List<string> childDirectories;
+            List<string> files;
+            try
+            {
+                childDirectories = Directory.EnumerateDirectories(directory)
+                    .Where(path => !IsIgnoredDirectory(path))
+                    .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                files = Directory.EnumerateFiles(directory)
+                    .Where(path => !IsIgnoredFile(path))
+                    .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            catch (Exception)
+            {
+                // 无权限 / 目录被占用：跳过这一层，不影响其余结果
+                return;
+            }
+
+            var indent = new string(' ', (level - 1) * 2);
+
+            foreach (var child in childDirectories)
+            {
+                if (entries++ >= maxEntries)
+                {
+                    return;
+                }
+
+                builder.Append(indent).Append(Path.GetFileName(child)).Append("/\n");
+                WalkDirectory(child, level + 1, maxLevel, builder, ref entries, maxEntries);
+            }
+
+            foreach (var file in files)
+            {
+                if (entries++ >= maxEntries)
+                {
+                    return;
+                }
+
+                builder.Append(indent).Append(Path.GetFileName(file)).Append('\n');
+            }
+        }
+
+        /// <summary>
+        /// 该文件是否被 .gitignore 忽略（目录忽略由 <see cref="IsIgnoredDirectory"/> 负责）
+        /// </summary>
+        private bool IsIgnoredFile(string fullPath)
+        {
+            var root = RootOf(fullPath);
+            if (root == null)
+            {
+                return false;
+            }
+
+            var relative = RelativeTo(fullPath, root);
+            if (relative.Length == 0)
+            {
+                return false;
+            }
+
+            var matcher = MatcherFor(root);
+            return matcher != null && matcher.IsIgnored(relative, false);
+        }
+
+        /// <summary>
+        /// 解析批量读取的路径列表：换行 / 分号 / 逗号分隔，并容忍模型误加的 JSON 方括号与引号
+        /// </summary>
+        private static List<string> SplitPaths(string pathsText)
+        {
+            var cleaned = (pathsText ?? string.Empty)
+                .Replace("[", " ")
+                .Replace("]", " ")
+                .Replace("\"", " ");
+
+            var result = new List<string>();
+            foreach (var part in cleaned.Split(new[] { '\n', '\r', ';', ',', '|' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var path = part.Trim();
+                if (path.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!result.Contains(path, StringComparer.OrdinalIgnoreCase))
+                {
+                    result.Add(path);
+                }
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -1319,6 +1570,134 @@ namespace LangCode.Workspace
         // ==================== 写工具（需要审批） ====================
 
         /// <summary>
+        /// 准备「删除文件」：记录原文与编码，审批通过后删除；撤销时按原编码还原
+        /// </summary>
+        public ToolResult PrepareDelete(string relativePath)
+        {
+            try
+            {
+                var full = ResolveWithinRoot(relativePath);
+                if (Directory.Exists(full))
+                {
+                    return Fail("delete_file 只删除文件，不删除目录：" + relativePath +
+                                "（请先清理目录内容，或改用 run_command 明确指定）");
+                }
+
+                if (!File.Exists(full))
+                {
+                    return Fail("文件不存在：" + relativePath);
+                }
+
+                var original = ReadAllTextDetected(full, out var encoding, out var hasBom);
+                var relative = NormalizePendingPath(relativePath, full);
+
+                return new ToolResult
+                {
+                    Ok = true,
+                    Output = "准备删除 " + relative,
+                    Pending = new PendingEdit
+                    {
+                        RelativePath = relative,
+                        OriginalText = original,
+                        NewText = string.Empty,
+                        IsDelete = true,
+                        Diff = SimpleDiff.Diff(original, string.Empty),
+                        OriginalEncoding = encoding,
+                        OriginalHadBom = hasBom,
+                        OriginalUsedCrLf = UsesCrLf(original),
+                    },
+                };
+            }
+            catch (Exception ex)
+            {
+                return Fail(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 准备「移动 / 重命名文件」：目标已存在时拒绝，审批通过后移动
+        /// </summary>
+        public ToolResult PrepareMove(string fromPath, string toPath)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(fromPath) || string.IsNullOrWhiteSpace(toPath))
+                {
+                    return Fail("from 与 to 都不能为空");
+                }
+
+                var fromFull = ResolveWithinRoot(fromPath);
+                var toFull = ResolveWithinRoot(toPath);
+
+                if (Directory.Exists(fromFull))
+                {
+                    return Fail("move_file 只移动文件，不移动目录：" + fromPath);
+                }
+
+                if (!File.Exists(fromFull))
+                {
+                    return Fail("文件不存在：" + fromPath);
+                }
+
+                if (string.Equals(fromFull, toFull, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Fail("源路径与目标路径相同，无需移动：" + fromPath);
+                }
+
+                if (Directory.Exists(toFull))
+                {
+                    return Fail("目标路径是一个已存在的目录：" + toPath);
+                }
+
+                if (File.Exists(toFull))
+                {
+                    return Fail("目标文件已存在，已拒绝覆盖：" + toPath);
+                }
+
+                var original = ReadAllTextDetected(fromFull, out var encoding, out var hasBom);
+                var fromRelative = NormalizePendingPath(fromPath, fromFull);
+                var toRelative = NormalizePendingPath(toPath, toFull);
+
+                return new ToolResult
+                {
+                    Ok = true,
+                    Output = "准备移动 " + fromRelative + " → " + toRelative,
+                    Pending = new PendingEdit
+                    {
+                        RelativePath = fromRelative,
+                        OriginalText = original,
+                        NewText = original,
+                        MoveToPath = toRelative,
+                        Diff = [],
+                        OriginalEncoding = encoding,
+                        OriginalHadBom = hasBom,
+                        OriginalUsedCrLf = UsesCrLf(original),
+                    },
+                };
+            }
+            catch (Exception ex)
+            {
+                return Fail(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 统一 PendingEdit 里的相对路径：模型给相对路径时原样归一化；
+        /// 给绝对路径（多根工作区）时换算成所在根内的相对路径
+        /// </summary>
+        private string NormalizePendingPath(string given, string fullPath)
+        {
+            var cleaned = (given ?? string.Empty).Trim().Replace('\\', '/');
+            if (!Path.IsPathRooted(given))
+            {
+                return cleaned;
+            }
+
+            var root = RootOf(fullPath) ?? _root;
+            return RelativeTo(fullPath, root).Replace('\\', '/');
+        }
+
+        /// <summary>
         /// 准备「整文件写入」：算出 Diff，等审批后再落盘
         /// </summary>
         public ToolResult PrepareWrite(string relativePath, string content)
@@ -1503,6 +1882,17 @@ namespace LangCode.Workspace
                     return Fail("没有待应用的改动");
                 }
 
+                // 删除 / 移动不是「写文本」，走各自的落盘路径（仍然保留乐观并发校验）
+                if (edit.IsDelete)
+                {
+                    return ApplyDelete(edit);
+                }
+
+                if (edit.IsMove)
+                {
+                    return ApplyMove(edit);
+                }
+
                 var full = ResolveWithinRoot(edit.RelativePath);
                 var directory = Path.GetDirectoryName(full);
                 if (!string.IsNullOrEmpty(directory))
@@ -1561,7 +1951,111 @@ namespace LangCode.Workspace
         }
 
         /// <summary>
-        /// 撤销一次已落盘的改动：改文件写回「改动前」的文本，新建文件直接删掉
+        /// 落盘一次删除：审批期间文件被改动过就拒绝，避免误删用户的新内容
+        /// </summary>
+        private ToolResult ApplyDelete(PendingEdit edit)
+        {
+            var full = ResolveWithinRoot(edit.RelativePath);
+
+            lock (GetWriteLock(full))
+            {
+                if (!File.Exists(full))
+                {
+                    return Fail("文件在审批期间已被删除，请重新读取后再试：" + edit.RelativePath);
+                }
+
+                var current = ReadAllTextDetected(full);
+                if (!string.Equals(current, edit.OriginalText ?? string.Empty, StringComparison.Ordinal))
+                {
+                    return Fail("文件在审批期间已被修改，请重新读取后再试：" + edit.RelativePath);
+                }
+
+                File.Delete(full);
+            }
+
+            edit.Applied = true;
+            InvalidateFileCache();
+
+            var deleted = SimpleDiff.CountDeleted(edit.Diff);
+            return Ok("已删除 " + edit.RelativePath + "（−" + deleted + "）");
+        }
+
+        /// <summary>
+        /// 落盘一次移动：源文件在审批期间被改动 / 目标被占用都拒绝
+        /// </summary>
+        private ToolResult ApplyMove(PendingEdit edit)
+        {
+            var from = ResolveWithinRoot(edit.RelativePath);
+            var to = ResolveWithinRoot(edit.MoveToPath);
+
+            ToolResult failure = null;
+
+            WithPathLocks(from, to, () =>
+            {
+                if (!File.Exists(from))
+                {
+                    failure = Fail("文件在审批期间已被删除，请重新读取后再试：" + edit.RelativePath);
+                    return;
+                }
+
+                if (File.Exists(to))
+                {
+                    failure = Fail("目标文件在审批期间已被创建，已拒绝覆盖：" + edit.MoveToPath);
+                    return;
+                }
+
+                if (Directory.Exists(to))
+                {
+                    failure = Fail("目标路径是一个已存在的目录：" + edit.MoveToPath);
+                    return;
+                }
+
+                var current = ReadAllTextDetected(from);
+                if (!string.Equals(current, edit.OriginalText ?? string.Empty, StringComparison.Ordinal))
+                {
+                    failure = Fail("文件在审批期间已被修改，请重新读取后再试：" + edit.RelativePath);
+                    return;
+                }
+
+                var directory = Path.GetDirectoryName(to);
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                File.Move(from, to);
+            });
+
+            if (failure != null)
+            {
+                return failure;
+            }
+
+            edit.Applied = true;
+            InvalidateFileCache();
+            return Ok("已移动 " + edit.RelativePath + " → " + edit.MoveToPath);
+        }
+
+        /// <summary>
+        /// 同时锁住两个路径：按路径排序后依次取锁，避免两个相反方向的移动互相死锁
+        /// </summary>
+        private void WithPathLocks(string first, string second, Action action)
+        {
+            var left = string.Compare(first, second, StringComparison.OrdinalIgnoreCase) <= 0 ? first : second;
+            var right = ReferenceEquals(left, first) ? second : first;
+
+            lock (GetWriteLock(left))
+            {
+                lock (GetWriteLock(right))
+                {
+                    action();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 撤销一次已落盘的改动：改文件写回「改动前」的文本，新建文件直接删掉，
+        /// 删除的文件按原编码还原，移动的文件移回原位置
         /// </summary>
         public ToolResult Revert(PendingEdit edit)
         {
@@ -1572,6 +2066,16 @@ namespace LangCode.Workspace
 
             try
             {
+                if (edit.IsDelete)
+                {
+                    return RevertDelete(edit);
+                }
+
+                if (edit.IsMove)
+                {
+                    return RevertMove(edit);
+                }
+
                 var full = ResolveWithinRoot(edit.RelativePath);
 
                 if (edit.IsNewFile)
@@ -1620,6 +2124,88 @@ namespace LangCode.Workspace
             {
                 return Fail("撤销失败：" + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// 撤销一次删除：按删除前的编码与换行写回原文
+        /// </summary>
+        private ToolResult RevertDelete(PendingEdit edit)
+        {
+            var full = ResolveWithinRoot(edit.RelativePath);
+
+            lock (GetWriteLock(full))
+            {
+                if (File.Exists(full))
+                {
+                    return Fail("撤销删除失败：文件已存在（可能已被其它操作重新创建）：" + edit.RelativePath);
+                }
+
+                var directory = Path.GetDirectoryName(full);
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                WriteTextPreserving(
+                    full,
+                    edit.OriginalText ?? string.Empty,
+                    edit.OriginalEncoding ?? new UTF8Encoding(false),
+                    edit.OriginalHadBom,
+                    edit.OriginalUsedCrLf);
+            }
+
+            edit.Applied = false;
+            InvalidateFileCache();
+            return Ok("已还原被删除的文件：" + edit.RelativePath);
+        }
+
+        /// <summary>
+        /// 撤销一次移动：把目标文件移回原位置
+        /// </summary>
+        private ToolResult RevertMove(PendingEdit edit)
+        {
+            var from = ResolveWithinRoot(edit.RelativePath);
+            var to = ResolveWithinRoot(edit.MoveToPath);
+
+            ToolResult failure = null;
+
+            WithPathLocks(from, to, () =>
+            {
+                if (!File.Exists(to))
+                {
+                    failure = Fail("撤销移动失败：目标文件不存在：" + edit.MoveToPath);
+                    return;
+                }
+
+                if (File.Exists(from))
+                {
+                    failure = Fail("撤销移动失败：原位置已存在同名文件：" + edit.RelativePath);
+                    return;
+                }
+
+                if (!string.Equals(ReadAllTextDetected(to), edit.NewText ?? string.Empty, StringComparison.Ordinal))
+                {
+                    failure = Fail("撤销移动失败：目标文件在移动后已被修改：" + edit.MoveToPath);
+                    return;
+                }
+
+                var directory = Path.GetDirectoryName(from);
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                File.Move(to, from);
+            });
+
+            if (failure != null)
+            {
+                return failure;
+            }
+
+            edit.Applied = false;
+            InvalidateFileCache();
+            return Ok("已移回：" + edit.RelativePath);
         }
 
         // ==================== 辅助 ====================
