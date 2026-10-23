@@ -374,7 +374,7 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 
 ### 8.1 先定位再精读
 
-- `semantic_search`：按功能 / 概念找相关片段；
+- `semantic_search`：**混合检索**——正文、符号名、路径三路分别用 BM25 打分后加权，中文按二元组切分；按功能 / 概念找片段时比纯关键词更稳；
 - `search_text`：正则搜索；
 - `list_symbols` / `find_references` / 类型层次 / 查找实现：先缩小范围；
 - `read_file` 支持 `start_line` / `end_line`，只读需要的片段。
@@ -384,6 +384,8 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 - 单条工具结果回灌前会截断到上限（默认 12000 字符，中段省略）；
 - 命令 / 验证 / 诊断输出另有更小的上限；
 - 只读工具重复调用且结果完全相同时，回灌一句「内容未变化，已省略」；
+- 文件内容按「最后写入时间 + 长度」缓存：同一文件在未改动前重复读取 / 搜索不再重复读盘；
+- 同一轮里多个只读工具（读文件 / 搜索 / 符号 / 混合检索）会**并行执行**（最多 4 个），写操作与需要审批的动作仍然串行；
 - 回灌历史前会折叠动作块里的超长参数（例如 `write_file` 的整段 content）；
 - 界面渲染仍使用原始文本，不受折叠影响。
 
@@ -410,7 +412,9 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 
 ### 8.6 源码位置
 
-- 主循环里的压缩 / 去重 / 折叠：[`AgentRunner.cs`](../LangCode/Agent/AgentRunner.cs)
+- 主循环里的压缩 / 去重 / 并行只读 / 折叠：[`AgentRunner.cs`](../LangCode/Agent/AgentRunner.cs)
+- 混合检索（正文 / 符号 / 路径 + 中文二元组）：[`SemanticIndex.cs`](../LangCode/Workspace/SemanticIndex.cs)
+- 文件内容缓存与忽略规则：[`FileSystemWorkspace.cs`](../LangCode/Workspace/FileSystemWorkspace.cs)
 - 工具结果裁剪：[`ToolOutputTrimmer`](../LangCode/Domain/Chat/ToolOutputTrimmer.cs)
 - 用量与预算：[`UsageStore.cs`](../LangCode/Persistence/UsageStore.cs)
 - 审计日志：[`AuditLog.cs`](../LangCode/Persistence/AuditLog.cs)
@@ -425,7 +429,7 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 
 | 类别         | 默认     | 覆盖的操作                                           |
 | ------------ | -------- | ---------------------------------------------------- |
-| 读取文件     | 自动批准 | 读文件 / 列目录 / 搜索 / 语义检索 / 符号查询         |
+| 读取文件     | 自动批准 | 读文件 / 列目录 / 搜索 / 混合检索 / 符号查询         |
 | 编辑已有文件 | 需要确认 | 局部替换 / 结构化编辑 / 覆盖已有文件 / 补丁 / 重命名 |
 | 新增文件     | 需要确认 | 新建文件                                             |
 | 执行终端命令 | 需要确认 | `run_command` / `run_tests` / 调试器控制             |
@@ -603,5 +607,5 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 - 并行子任务只发生在「同一轮出现多个 `new_task`」时；其他工具仍按顺序执行（文件写入由工作区按路径锁保护）。
 - 计划模式、审批、命令策略是三层不同的保护，不能互相替代。
 - 检查点依赖本机可调用的 `git`；不可用时检查点功能优雅失败，其他能力不受影响。
-- 语义检索是本地索引，关闭后 `semantic_search` 等工具不可用；C# 的类型层次 / 查找实现会优先走 Roslyn。
+- 混合检索是本地索引（BM25 + 符号 / 路径字段 + 中文二元组），关闭后 `semantic_search` 等工具不可用；C# 的类型层次 / 查找实现会优先走 Roslyn。
 - `run_tests` 的 `filter` 目前只对 `dotnet test` 生效。

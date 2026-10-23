@@ -36,19 +36,19 @@
 
 ### 3.1 代码理解（只读）
 
-| 工具                   | 作用                                                       | 主要参数                         | 分派  | 审批类别 |
-| ---------------------- | ---------------------------------------------------------- | -------------------------------- | ----- | -------- |
-| `list_files`           | 列出工作区文件，支持 `*` / `?` 通配                        | `glob`                           | Local | 读取     |
-| `list_dir`             | 树形列出目录内容（目录带 `/` 后缀，支持递归深度）          | `path`、`depth`                  | Local | 读取     |
-| `read_file`            | 读取文件内容，可按起止行裁剪                               | `path`、`start_line`、`end_line` | Local | 读取     |
-| `read_multiple_files`  | 一次读取多个文件（带行号，适合同时看几个相关文件）         | `paths`、`max_chars_each`        | Local | 读取     |
-| `search_text`          | 按正则搜索文件内容，返回 `路径:行号: 内容`                 | `pattern`、`glob`                | Local | 读取     |
-| `list_symbols`         | 列出文件里的类 / 方法 / 函数及行号（C# 走 Roslyn，含签名） | `path`                           | Local | 读取     |
-| `find_references`      | 查找符号引用（Roslyn 标识符级，跳过字符串与注释）          | `symbol`、`glob`、`limit`        | Local | 读取     |
-| `semantic_search`      | 语义检索：按功能 / 概念找相关代码片段                      | `query`、`limit`                 | Local | 读取     |
-| `search_docs`          | 在工作区文档（README / docs / \*.md）中按关键词检索        | `query`、`glob`、`limit`         | Local | 读取     |
-| `get_type_hierarchy`   | 查类型的基类 / 接口 / 已知派生类型                         | `type`                           | Local | 读取     |
-| `find_implementations` | 查实现了某接口 / 继承了某基类的全部类型                    | `type`                           | Local | 读取     |
+| 工具                   | 作用                                                        | 主要参数                         | 分派  | 审批类别 |
+| ---------------------- | ----------------------------------------------------------- | -------------------------------- | ----- | -------- |
+| `list_files`           | 列出工作区文件，支持 `*` / `?` 通配                         | `glob`                           | Local | 读取     |
+| `list_dir`             | 树形列出目录内容（目录带 `/` 后缀，支持递归深度）           | `path`、`depth`                  | Local | 读取     |
+| `read_file`            | 读取文件内容，可按起止行裁剪                                | `path`、`start_line`、`end_line` | Local | 读取     |
+| `read_multiple_files`  | 一次读取多个文件（带行号，适合同时看几个相关文件）          | `paths`、`max_chars_each`        | Local | 读取     |
+| `search_text`          | 按正则搜索文件内容，返回 `路径:行号: 内容`                  | `pattern`、`glob`                | Local | 读取     |
+| `list_symbols`         | 列出文件里的类 / 方法 / 函数及行号（C# 走 Roslyn，含签名）  | `path`                           | Local | 读取     |
+| `find_references`      | 查找符号引用（Roslyn 标识符级，跳过字符串与注释）           | `symbol`、`glob`、`limit`        | Local | 读取     |
+| `semantic_search`      | 混合检索：正文 + 符号名 + 路径三路加权，按功能 / 概念找片段 | `query`、`limit`                 | Local | 读取     |
+| `search_docs`          | 在工作区文档（README / docs / \*.md）中按关键词检索         | `query`、`glob`、`limit`         | Local | 读取     |
+| `get_type_hierarchy`   | 查类型的基类 / 接口 / 已知派生类型                          | `type`                           | Local | 读取     |
+| `find_implementations` | 查实现了某接口 / 继承了某基类的全部类型                     | `type`                           | Local | 读取     |
 
 ### 3.2 代码修改（写）
 

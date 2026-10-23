@@ -621,7 +621,7 @@ namespace LangCode.Ui.ToolWindows
                 case "mcp_call": return "MCP 调用";
                 case "list_symbols": return "列出符号";
                 case "find_references": return "查找引用";
-                case "semantic_search": return "语义搜索";
+                case "semantic_search": return "混合检索";
                 case "get_type_hierarchy": return "类型层次";
                 case "find_implementations": return "查找实现";
                 case "edit_symbol": return "编辑符号";

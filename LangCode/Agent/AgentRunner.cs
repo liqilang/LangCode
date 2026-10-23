@@ -237,10 +237,25 @@ namespace LangCode.Agent
         /// </summary>
         private static readonly HashSet<string> DedupTools = new(StringComparer.OrdinalIgnoreCase)
         {
-            "read_file", "list_files", "search_text", "list_symbols",
+            "read_file", "read_multiple_files", "list_files", "list_dir", "search_text", "list_symbols",
             "find_references", "semantic_search", "search_docs",
             "get_type_hierarchy", "find_implementations",
         };
+
+        /// <summary>
+        /// 允许在同一轮里并行执行的只读工具（纯 IO / 只读索引，不碰磁盘状态）。
+        /// 写操作、命令、浏览器、MCP 与需要人工审批的动作一律串行。
+        /// </summary>
+        private static readonly HashSet<string> ParallelReadTools = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "read_file", "read_multiple_files", "list_files", "list_dir",
+            "search_text", "search_docs", "semantic_search", "list_symbols", "find_references",
+        };
+
+        /// <summary>
+        /// 只读工具并行度上限：太高会让磁盘 / Roslyn 互相抢资源，收益反而下降
+        /// </summary>
+        private const int MaxParallelReadTools = 4;
 
         /// <summary>
         /// 摘要块在回灌历史里的固定前缀（便于识别，也便于排查「这张摘要从哪来」）
@@ -518,6 +533,21 @@ namespace LangCode.Agent
                 var orderedResults = new ToolResult[actions.Count];
                 var parallelTasks = new List<KeyValuePair<int, Task<ToolResult>>>();
 
+                // 只读工具（读文件 / 搜索 / 符号）互不依赖：同一轮里真并行执行，
+                // 把「发一个等一个」的磁盘等待叠起来；写操作与需要人工审批的动作仍然串行。
+                var parallelReadCount = 0;
+                foreach (var candidate in actions)
+                {
+                    if (CanRunReadOnlyInParallel(candidate))
+                    {
+                        parallelReadCount++;
+                    }
+                }
+
+                var parallelReads = parallelReadCount > 1;
+                var readGate = parallelReads ? new SemaphoreSlim(MaxParallelReadTools) : null;
+                var readTasks = new List<KeyValuePair<int, Task<ToolResult>>>();
+
                 for (var i = 0; i < actions.Count; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -530,7 +560,58 @@ namespace LangCode.Agent
                         continue;
                     }
 
+                    if (parallelReads && CanRunReadOnlyInParallel(action))
+                    {
+                        var index = i;
+                        var task = Task.Run(async () =>
+                        {
+                            await readGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                            try
+                            {
+                                return await ExecuteActionAsync(action, callbacks, cancellationToken, suppressStreaming: false).ConfigureAwait(false);
+                            }
+                            finally
+                            {
+                                readGate.Release();
+                            }
+                        }, cancellationToken);
+
+                        readTasks.Add(new KeyValuePair<int, Task<ToolResult>>(index, task));
+                        continue;
+                    }
+
                     orderedResults[i] = await ExecuteActionAsync(action, callbacks, cancellationToken, suppressStreaming: false).ConfigureAwait(false);
+                }
+
+                // 并行只读结果按原顺序归档：回灌历史 / 卡片顺序仍与模型给出的动作顺序一致
+                if (readTasks.Count > 0)
+                {
+                    callbacks.OnNotice?.Invoke("并行执行 " + readTasks.Count + " 个只读工具…");
+
+                    foreach (var pair in readTasks)
+                    {
+                        try
+                        {
+                            // 任务在本次循环里已经启动，这里只是收同一个上下文发起的结果
+#pragma warning disable VSTHRD003
+                            orderedResults[pair.Key] = await pair.Value.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            orderedResults[pair.Key] = new ToolResult
+                            {
+                                Ok = false,
+                                Output = "只读工具执行失败：" + ex.GetBaseException().Message,
+                            };
+                        }
+                    }
+
+                    readGate.Dispose();
                 }
 
                 if (parallelTasks.Count > 0)
@@ -693,6 +774,25 @@ namespace LangCode.Agent
         }
 
         /// <summary>
+        /// 这个只读动作能否与其他只读动作并行：
+        /// 必须是白名单内的纯读工具，且「读取」类别已自动批准（否则会同时弹出多张审批卡）。
+        /// </summary>
+        private bool CanRunReadOnlyInParallel(ToolAction action)
+        {
+            if (action == null || string.IsNullOrWhiteSpace(action.Name))
+            {
+                return false;
+            }
+
+            if (!ParallelReadTools.Contains(action.Name) || ToolCatalog.IsDestructive(action.Name))
+            {
+                return false;
+            }
+
+            return ApprovalCatalog.IsAutoApprovedForTool(_settings, action.Name);
+        }
+
+        /// <summary>
         /// 只读工具的重复结果判定：同样的调用 + 同样的结果 ⇒ 内容未变化，回灌可省略。
         /// </summary>
         private bool IsDuplicateResult(ToolAction action, string output)
@@ -722,7 +822,27 @@ namespace LangCode.Agent
             var parts = new List<string>(action.Arguments.Count);
             foreach (var pair in action.Arguments)
             {
-                parts.Add(pair.Key + "=" + (pair.Value ?? string.Empty));
+                var value = pair.Value ?? string.Empty;
+
+                // 路径归一化：`src\A.cs` 与 `src/A.cs` 是同一次读取，应该命中同一条去重记录
+                if (string.Equals(pair.Key, "path", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pair.Key, "from", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pair.Key, "to", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = value.Trim().Replace('\\', '/');
+                }
+                else if (string.Equals(pair.Key, "paths", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 批量读取的路径列表统一成「每行一个」，换行 / 分号 / 逗号写法视为同一组
+                    value = string.Join(
+                        "\n",
+                        value.Split(new[] { '\n', '\r', ';', ',', '|' }, StringSplitOptions.RemoveEmptyEntries)
+                             .Select(part => part.Trim())
+                             .Where(part => part.Length > 0)
+                             .Select(part => part.Replace('\\', '/')));
+                }
+
+                parts.Add(pair.Key + "=" + value);
             }
 
             parts.Sort(StringComparer.Ordinal);

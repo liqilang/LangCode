@@ -107,13 +107,23 @@ namespace LangCode.Workspace
         private sealed class IndexSnapshot
         {
             public List<CodeChunk> Chunks = new List<CodeChunk>();
-            public Dictionary<string, List<int>> Postings = new Dictionary<string, List<int>>(StringComparer.Ordinal);      // 词 → 片段下标
-            public Dictionary<string, int> DocumentFrequency = new Dictionary<string, int>(StringComparer.Ordinal);        // 词 → 出现该词的片段数
-            public Dictionary<string, int> PathFrequency = new Dictionary<string, int>(StringComparer.Ordinal);            // 词 → 出现该词的路径数（路径加权）
+
+            // 正文 / 符号名 / 路径三路倒排：混合检索分别打分后再融合，
+            // 避免「符号名完全匹配」被大段注释里的词频淹没
+            public Dictionary<string, List<int>> Postings = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            public Dictionary<string, int> DocumentFrequency = new Dictionary<string, int>(StringComparer.Ordinal);
+            public Dictionary<string, List<int>> SymbolPostings = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            public Dictionary<string, int> SymbolDocumentFrequency = new Dictionary<string, int>(StringComparer.Ordinal);
+            public Dictionary<string, List<int>> PathPostings = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            public Dictionary<string, int> PathDocumentFrequency = new Dictionary<string, int>(StringComparer.Ordinal);
+            public Dictionary<string, int> PathFrequency = new Dictionary<string, int>(StringComparer.Ordinal);
+
             public List<SymbolNode> Symbols = new List<SymbolNode>();
             public Dictionary<string, List<SymbolNode>> SymbolsByName = new Dictionary<string, List<SymbolNode>>(StringComparer.Ordinal);
             public int ChunkCount = 1;
             public double AvgChunkLength = 1;
+            public double AvgSymbolLength = 1;
+            public double AvgPathLength = 1;
             public DateTime BuiltAtUtc = DateTime.MinValue;
         }
 
@@ -268,40 +278,81 @@ namespace LangCode.Workspace
             var top = limit <= 0 ? 8 : limit;
             var scores = new Dictionary<int, double>();
             var unique = terms.Distinct(StringComparer.Ordinal).ToList();
+            var queryText = (query ?? string.Empty).Trim();
 
+            // 混合检索：正文 / 符号名 / 路径三路分别做 BM25 打分后累加。
+            // 只看正文时，符号名完全匹配合容易被大段注释里的高频词淹没；
+            // 单独给符号名与路径更高的权重，能让「找 AgentRunner 这个类」直接命中定义。
             foreach (var term in unique)
             {
-                if (!snapshot.Postings.TryGetValue(term, out var posting))
+                AccumulateField(
+                    snapshot.Postings, snapshot.DocumentFrequency, chunks, term,
+                    weight: 1.0,
+                    fieldOf: chunk => chunk.Text,
+                    lengthOf: chunk => chunk.Text.Length / 4.0,
+                    averageLength: snapshot.AvgChunkLength,
+                    chunkCount: snapshot.ChunkCount,
+                    scores: scores);
+
+                AccumulateField(
+                    snapshot.SymbolPostings, snapshot.SymbolDocumentFrequency, chunks, term,
+                    weight: 3.0,
+                    fieldOf: chunk => chunk.Symbol,
+                    lengthOf: chunk => Math.Max(1, chunk.Symbol.Length / 4.0),
+                    averageLength: snapshot.AvgSymbolLength,
+                    chunkCount: snapshot.ChunkCount,
+                    scores: scores);
+
+                AccumulateField(
+                    snapshot.PathPostings, snapshot.PathDocumentFrequency, chunks, term,
+                    weight: 1.6,
+                    fieldOf: chunk => chunk.Path,
+                    lengthOf: chunk => Math.Max(1, chunk.Path.Length / 4.0),
+                    averageLength: snapshot.AvgPathLength,
+                    chunkCount: snapshot.ChunkCount,
+                    scores: scores);
+            }
+
+            // 结构信号：整段查询命中正文 / 符号名时再加权（例如直接查 "AgentRunner"）
+            if (queryText.Length >= 2)
+            {
+                foreach (var index in scores.Keys.ToList())
                 {
-                    continue;
+                    var chunk = chunks[index];
+
+                    if (chunk.Text.IndexOf(queryText, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        scores[index] *= 1.6;
+                    }
+
+                    if (chunk.Symbol.Length > 0)
+                    {
+                        if (string.Equals(chunk.Symbol, queryText, StringComparison.OrdinalIgnoreCase))
+                        {
+                            scores[index] *= 2.2;
+                        }
+                        else if (chunk.Symbol.IndexOf(queryText, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            scores[index] *= 1.5;
+                        }
+                    }
                 }
+            }
 
-                var df = Math.Max(1, snapshot.DocumentFrequency[term]);
-                var idf = Math.Log(1.0 + (snapshot.ChunkCount - df + 0.5) / (df + 0.5));
-
-                foreach (var chunkIndex in posting)
+            // 兜底：分词完全没命中（标点 / 长中文短语）时按子串再扫一遍，避免直接返回空
+            if (scores.Count == 0 && queryText.Length >= 2)
+            {
+                for (var i = 0; i < chunks.Count; i++)
                 {
-                    var chunk = chunks[chunkIndex];
-                    var tf = CountTerm(chunk.Text, term);
-                    if (tf == 0)
+                    var text = chunks[i].Text;
+                    foreach (var term in unique)
                     {
-                        continue;
+                        if (term.Length >= 2 && text.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            scores[i] = 0.5;
+                            break;
+                        }
                     }
-
-                    var dl = Math.Max(1, chunk.Text.Length / 4.0);
-                    const double k1 = 1.4;
-                    const double b = 0.72;
-                    var denom = tf + k1 * (1 - b + b * dl / snapshot.AvgChunkLength);
-                    var score = idf * (tf * (k1 + 1)) / Math.Max(0.0001, denom);
-
-                    // 路径命中加权：查 "AgentRunner" 时，文件名叫 AgentRunner.cs 的片段更相关
-                    if (chunk.Path.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        score *= 1.35;
-                    }
-
-                    scores.TryGetValue(chunkIndex, out var existing);
-                    scores[chunkIndex] = existing + score;
                 }
             }
 
@@ -317,8 +368,8 @@ namespace LangCode.Workspace
                 .ToList();
 
             var builder = new StringBuilder();
-            builder.Append("语义检索结果（“").Append((query ?? string.Empty).Trim()).Append("”，共 ")
-                   .Append(ranked.Count).Append(" 段，按相关度排序）：\n\n");
+            builder.Append("混合检索结果（“").Append((query ?? string.Empty).Trim()).Append("”，共 ")
+                   .Append(ranked.Count).Append(" 段，正文 / 符号 / 路径三路加权）：\n\n");
 
             var rank = 0;
             foreach (var entry in ranked)
@@ -341,6 +392,52 @@ namespace LangCode.Workspace
 
             builder.Append("提示：需要完整内容时用 read_file 读取上面对应的文件与行号");
             return Ok(builder.ToString());
+        }
+
+        /// <summary>
+        /// 单字段 BM25 打分累加：正文 / 符号名 / 路径各自使用自己的平均长度与权重
+        /// </summary>
+        private static void AccumulateField(
+            Dictionary<string, List<int>> postings,
+            Dictionary<string, int> documentFrequency,
+            IList<CodeChunk> chunks,
+            string term,
+            double weight,
+            Func<CodeChunk, string> fieldOf,
+            Func<CodeChunk, double> lengthOf,
+            double averageLength,
+            int chunkCount,
+            Dictionary<int, double> scores)
+        {
+            if (postings == null || !postings.TryGetValue(term, out var posting) || posting.Count == 0)
+            {
+                return;
+            }
+
+            documentFrequency.TryGetValue(term, out var df);
+            df = Math.Max(1, df > 0 ? df : posting.Count);
+
+            var idf = Math.Log(1.0 + (chunkCount - df + 0.5) / (df + 0.5));
+            const double k1 = 1.4;
+            const double b = 0.72;
+            var avg = Math.Max(1.0, averageLength);
+
+            foreach (var chunkIndex in posting)
+            {
+                var chunk = chunks[chunkIndex];
+                var tf = CountTerm(fieldOf(chunk), term);
+                if (tf == 0)
+                {
+                    continue;
+                }
+
+                var dl = Math.Max(1.0, lengthOf(chunk));
+                var denom = tf + k1 * (1 - b + b * dl / avg);
+                var score = weight * idf * (tf * (k1 + 1)) / Math.Max(0.0001, denom);
+
+                scores.TryGetValue(chunkIndex, out var existing);
+                scores[chunkIndex] = existing + score;
+            }
         }
 
         /// <summary>
@@ -528,9 +625,15 @@ namespace LangCode.Workspace
                 chunks.AddRange(ChunkFile(relative, text));
             }
 
-            // 倒排索引：词 → 片段下标
+            // 正文字段倒排：词 → 片段下标
             var postings = new Dictionary<string, List<int>>(StringComparer.Ordinal);
             var df = new Dictionary<string, int>(StringComparer.Ordinal);
+
+            // 符号名 / 路径字段倒排：混合检索的两路结构信号
+            var symbolPostings = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            var symbolDf = new Dictionary<string, int>(StringComparer.Ordinal);
+            var pathPostings = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            var pathDf = new Dictionary<string, int>(StringComparer.Ordinal);
             var pathFreq = new Dictionary<string, int>(StringComparer.Ordinal);
 
             for (var i = 0; i < chunks.Count; i++)
@@ -549,8 +652,32 @@ namespace LangCode.Workspace
                     df[term] = count + 1;
                 }
 
+                foreach (var term in Tokenize(chunks[i].Symbol).Distinct(StringComparer.Ordinal))
+                {
+                    if (!symbolPostings.TryGetValue(term, out var symbolList))
+                    {
+                        symbolList = [];
+                        symbolPostings[term] = symbolList;
+                    }
+
+                    symbolList.Add(i);
+                    symbolDf.TryGetValue(term, out var symbolCount);
+                    symbolDf[term] = symbolCount + 1;
+                }
+
                 foreach (var term in Tokenize(chunks[i].Path).Distinct(StringComparer.Ordinal))
                 {
+                    if (!pathPostings.TryGetValue(term, out var pathList))
+                    {
+                        pathList = [];
+                        pathPostings[term] = pathList;
+                    }
+
+                    pathList.Add(i);
+
+                    pathDf.TryGetValue(term, out var pathCount);
+                    pathDf[term] = pathCount + 1;
+
                     pathFreq.TryGetValue(term, out var count);
                     pathFreq[term] = count + 1;
                 }
@@ -561,17 +688,48 @@ namespace LangCode.Workspace
                 Chunks = chunks,
                 Postings = postings,
                 DocumentFrequency = df,
+                SymbolPostings = symbolPostings,
+                SymbolDocumentFrequency = symbolDf,
+                PathPostings = pathPostings,
+                PathDocumentFrequency = pathDf,
                 PathFrequency = pathFreq,
                 Symbols = symbols,
                 SymbolsByName = symbols
                     .GroupBy(s => s.Name, StringComparer.Ordinal)
                     .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal),
                 ChunkCount = Math.Max(1, chunks.Count),
-                AvgChunkLength = chunks.Count == 0
-                    ? 1
-                    : Math.Max(1, chunks.Average(c => c.Text.Length / 4.0)),
+                AvgChunkLength = AverageFieldLength(chunks, c => c.Text),
+                AvgSymbolLength = AverageFieldLength(chunks, c => c.Symbol),
+                AvgPathLength = AverageFieldLength(chunks, c => c.Path),
                 BuiltAtUtc = DateTime.UtcNow,
             };
+        }
+
+        /// <summary>
+        /// 字段平均长度（按 4 字符 ≈ 1 token 折算）：BM25 的长度归一化用
+        /// </summary>
+        private static double AverageFieldLength(IList<CodeChunk> chunks, Func<CodeChunk, string> field)
+        {
+            if (chunks == null || chunks.Count == 0)
+            {
+                return 1;
+            }
+
+            double total = 0;
+            var count = 0;
+            foreach (var chunk in chunks)
+            {
+                var text = field(chunk) ?? string.Empty;
+                if (text.Length == 0)
+                {
+                    continue;
+                }
+
+                total += Math.Max(1, text.Length / 4.0);
+                count++;
+            }
+
+            return count == 0 ? 1 : Math.Max(1, total / count);
         }
 
         /// <summary>
@@ -778,12 +936,9 @@ namespace LangCode.Workspace
                 var word = match.Value;
                 if (word.Length == 0 || word[0] > 0x7f)
                 {
-                    // 中文按整段作为一个词（够用，且不必引入分词器）
-                    if (word.Length > 0)
-                    {
-                        tokens.Add(word);
-                    }
-
+                    // 中文没有空格：整段 + 二元组一起入索引。
+                    // 只保留整段会导致「登录」查不到「登录表单校验」——二元组让子串查询也能命中
+                    AddCjkTokens(word, tokens);
                     continue;
                 }
 
@@ -800,6 +955,29 @@ namespace LangCode.Workspace
             }
 
             return tokens;
+        }
+
+        /// <summary>
+        /// 中文分词：保留完整片段（精确短语），再补全部二元组（子串召回）
+        /// </summary>
+        private static void AddCjkTokens(string word, List<string> tokens)
+        {
+            if (string.IsNullOrEmpty(word))
+            {
+                return;
+            }
+
+            tokens.Add(word);
+
+            if (word.Length <= 2)
+            {
+                return;
+            }
+
+            for (var i = 0; i + 1 < word.Length; i++)
+            {
+                tokens.Add(word.Substring(i, 2));
+            }
         }
 
         /// <summary>

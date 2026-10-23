@@ -121,6 +121,26 @@ namespace LangCode.Workspace
         private int _cachedDepth = -1;
         private DateTime _cachedAtUtc = DateTime.MinValue;
 
+        // ==================== 文件内容缓存 ====================
+        // read_file / read_multiple_files / search_text / Prepare* 会反复读同一文件：
+        // 用「最后写入时间 + 文件长度」做版本键，内容没变就直接复用原文，避免重复读盘与解码
+
+        private sealed class CachedFileText
+        {
+            public DateTime LastWriteUtc;
+            public long Length;
+            public string Text = string.Empty;
+            public bool Truncated;
+        }
+
+        private readonly object _textCacheGate = new object();
+        private readonly Dictionary<string, CachedFileText> _textCache =
+            new Dictionary<string, CachedFileText>(StringComparer.OrdinalIgnoreCase);
+        private long _textCacheChars;
+
+        private const int MaxCachedFileCount = 128;
+        private const long MaxCachedChars = 8_000_000;
+
         /// <summary>
         /// 缓存有效期：太短没意义，太长会让刚新建的文件「看不见」
         /// </summary>
@@ -2248,7 +2268,7 @@ namespace LangCode.Workspace
         }
 
         /// <summary>
-        /// 写盘后让缓存失效（新建 / 删除会改变文件清单）
+        /// 写盘后让缓存失效（新建 / 删除会改变文件清单，内容缓存也必须丢弃）
         /// </summary>
         private void InvalidateFileCache()
         {
@@ -2257,6 +2277,12 @@ namespace LangCode.Workspace
                 _cachedFiles = null;
                 _cachedDepth = -1;
                 _cachedAtUtc = DateTime.MinValue;
+            }
+
+            lock (_textCacheGate)
+            {
+                _textCache.Clear();
+                _textCacheChars = 0;
             }
         }
 
@@ -2472,10 +2498,89 @@ namespace LangCode.Workspace
                 : string.Empty;
         }
 
+        /// <summary>
+        /// 带版本校验的读文件：文件未变（最后写入时间 + 长度一致）就直接复用上次读到的文本。
+        /// 供 read_file / 搜索 / 符号定位共用，避免同一轮任务里反复读盘。
+        /// </summary>
         private string ReadTextCapped(string full, out bool truncated)
         {
-            // 一次最多读 MaxFileChars 个字符：不再先 ReadToEnd 再判断，
-            // 超大文件（例如压缩后的单行 JS）也不会先被整体读进内存
+            DateTime lastWriteUtc;
+            long length;
+            try
+            {
+                var info = new FileInfo(full);
+                if (!info.Exists)
+                {
+                    truncated = false;
+                    return ReadTextCappedCore(full, out truncated);
+                }
+
+                lastWriteUtc = info.LastWriteTimeUtc;
+                length = info.Length;
+            }
+            catch (Exception)
+            {
+                // 取文件信息失败：退回直接读取（让上层拿到真正的错误）
+                return ReadTextCappedCore(full, out truncated);
+            }
+
+            lock (_textCacheGate)
+            {
+                if (_textCache.TryGetValue(full, out var hit) &&
+                    hit.LastWriteUtc == lastWriteUtc && hit.Length == length)
+                {
+                    truncated = hit.Truncated;
+                    return hit.Text;
+                }
+            }
+
+            var text = ReadTextCappedCore(full, out truncated);
+
+            lock (_textCacheGate)
+            {
+                if (_textCache.TryGetValue(full, out var old))
+                {
+                    _textCacheChars -= old.Text.Length;
+                }
+
+                _textCache[full] = new CachedFileText
+                {
+                    LastWriteUtc = lastWriteUtc,
+                    Length = length,
+                    Text = text,
+                    Truncated = truncated,
+                };
+                _textCacheChars += text.Length;
+
+                if (_textCache.Count > MaxCachedFileCount || _textCacheChars > MaxCachedChars)
+                {
+                    // 近似 LRU：时间戳最旧的一批先淘汰（不必精确，缓存只是加速）
+                    var evict = _textCache
+                        .OrderBy(pair => pair.Value.LastWriteUtc)
+                        .Take(Math.Max(1, _textCache.Count / 2))
+                        .Select(pair => pair.Key)
+                        .ToList();
+
+                    foreach (var key in evict)
+                    {
+                        if (_textCache.TryGetValue(key, out var removed))
+                        {
+                            _textCacheChars -= removed.Text.Length;
+                            _textCache.Remove(key);
+                        }
+                    }
+                }
+            }
+
+            return text;
+        }
+
+        /// <summary>
+        /// 真正的读取实现：一次最多读 <see cref="MaxFileChars"/> 个字符，
+        /// 超大文件（例如压缩后的单行 JS）不会先被整体读进内存
+        /// </summary>
+        private string ReadTextCappedCore(string full, out bool truncated)
+        {
             using (var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             using (var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
             {

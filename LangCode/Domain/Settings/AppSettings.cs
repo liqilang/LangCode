@@ -505,7 +505,7 @@ namespace LangCode.Domain.Settings
 
         // ==================== 语义索引 / RAG ====================
         /// <summary>
-        /// 是否启用本地代码库语义索引（<c>semantic_search</c> 等）
+        /// 是否启用本地代码库混合索引（正文 / 符号 / 路径三路 BM25，<c>semantic_search</c> 等）
         /// </summary>
         [DataMember(Name = "semanticIndex", Order = 98)]
         public bool SemanticIndex { get; set; } = true;
