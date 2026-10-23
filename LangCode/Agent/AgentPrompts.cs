@@ -8,7 +8,7 @@ namespace LangCode.Agent
     /// </summary>
     public static class AgentPrompts
     {
-        public static string BuildSystemPrompt(AppSettings settings, string projectRules = null, string environmentBrief = null)
+        public static string BuildSystemPrompt(AppSettings settings, string projectRules = null, string environmentBrief = null, string repoMap = null)
         {
             var builder = new StringBuilder();
 
@@ -36,6 +36,13 @@ namespace LangCode.Agent
             {
                 builder.AppendLine("【工作区环境（助手自动识别，无需用户配置）】" + environmentBrief);
                 builder.AppendLine("  验证命令、自动修复、上下文采集、混合检索都由助手自动完成；若探测结果与实际不符，请以文件内容为准");
+                builder.AppendLine();
+            }
+
+            // 仓库地图：目录 + 入口文件 + 关键符号，减少「先猜项目结构」的探索轮次
+            if (!string.IsNullOrWhiteSpace(repoMap))
+            {
+                builder.AppendLine(repoMap.Trim());
                 builder.AppendLine();
             }
 

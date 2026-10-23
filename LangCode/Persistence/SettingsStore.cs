@@ -140,6 +140,7 @@ namespace LangCode.Persistence
 
             settings.ApiKey = ProtectSecret(settings.ApiKey);
             settings.WebSearchApiKey = ProtectSecret(settings.WebSearchApiKey);
+            settings.EmbeddingApiKey = ProtectSecret(settings.EmbeddingApiKey);
 
             foreach (var profile in settings.Profiles ?? [])
             {
@@ -185,6 +186,7 @@ namespace LangCode.Persistence
 
             settings.ApiKey = UnprotectSecret(settings.ApiKey);
             settings.WebSearchApiKey = UnprotectSecret(settings.WebSearchApiKey);
+            settings.EmbeddingApiKey = UnprotectSecret(settings.EmbeddingApiKey);
 
             foreach (var profile in settings.Profiles ?? [])
             {

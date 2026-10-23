@@ -339,11 +339,14 @@ namespace LangCode.Agent
                 Endpoint = settings?.WebSearchEndpoint ?? string.Empty,
                 MaxResults = settings?.WebSearchMaxResults ?? 5,
             };
-            _index = sharedIndex ?? new SemanticIndex(root)
+            _index = sharedIndex ?? new SemanticIndex(root, workspace?.Roots)
             {
                 MaxFiles = settings?.SemanticIndexMaxFiles ?? 2000,
                 MaxChunkChars = settings?.SemanticChunkChars ?? 1600,
             };
+
+            // 用户可能在两轮之间改了 embedding 配置：每轮都同步一次，SemanticIndex 内部会按签名重建 provider
+            _index.Embedding = EmbeddingOptions.FromSettings(settings);
             _mcp.WorkingDirectory = root;
 
             // 服务器列表变了（删了 / 停用了）就把对应连接释放掉
@@ -395,7 +398,8 @@ namespace LangCode.Agent
 
             // 系统提示词在整轮任务里不变（工具清单 / 项目规则 / 工作区环境都不会中途改变）：
             // 循环外构建一次即可 —— 既省去每步重复拼接，也让提示缓存的前缀保持稳定、更易命中
-            var systemPrompt = AgentPrompts.BuildSystemPrompt(_settings, projectRules, _toolchain?.Describe());
+            var repoMap = _settings != null && _settings.RepoMap ? RepoMap.Build(_workspace?.Roots) : null;
+            var systemPrompt = AgentPrompts.BuildSystemPrompt(_settings, projectRules, _toolchain?.Describe(), repoMap);
 
             // MaxSteps <= 0 = 不限制：循环由「模型不再要求用工具」或用户取消来结束
             for (var step = 0; MaxSteps <= 0 || step < MaxSteps; step++)
@@ -406,10 +410,7 @@ namespace LangCode.Agent
                 // （此前只是「提示」，长任务会继续烧钱，用户只能眼睁睁看着）
                 if (_settings != null && UsageStore.IsOverBudget(_settings.BudgetUsd, out var usageNow))
                 {
-                    callbacks.OnNotice?.Invoke(
-                        "已达到费用预算上限（预算 $" + _settings.BudgetUsd.ToString("0.00") +
-                        " / 累计约 $" + usageNow.CostUsd.ToString("0.00") + "），本轮已停止。" +
-                        "可在「设置 → 用量」调整预算或清空用量后重试");
+                    callbacks.OnNotice?.Invoke("已达到费用预算上限（预算 $" + _settings.BudgetUsd.ToString("0.00") + " / 累计约 $" + usageNow.CostUsd.ToString("0.00") + "），本轮已停止。" + "可在「设置 → 用量」调整预算或清空用量后重试");
                     return;
                 }
 
@@ -458,9 +459,7 @@ namespace LangCode.Agent
                     ExtraBodyJson = _settings.GetProviderOption("caps.extraBody") ?? string.Empty,
                 };
 
-                await _backend
-                    .SendAsync(request, delta => { buffer.Append(delta); callbacks.OnDelta?.Invoke(delta); }, cancellationToken)
-                    .ConfigureAwait(false);
+                await _backend.SendAsync(request, delta => { buffer.Append(delta); callbacks.OnDelta?.Invoke(delta); }, cancellationToken).ConfigureAwait(false);
 
                 var raw = buffer.ToString();
                 var actions = ToolProtocol.ExtractActions(raw);
@@ -743,9 +742,7 @@ namespace LangCode.Agent
             string summary = null;
             try
             {
-                summary = await ContextSummarizer
-                    .SummarizeAsync(_backend, _settings, dropped, cancellationToken)
-                    .ConfigureAwait(false);
+                summary = await ContextSummarizer.SummarizeAsync(_backend, _settings, dropped, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -758,13 +755,11 @@ namespace LangCode.Agent
 
             if (string.IsNullOrWhiteSpace(summary))
             {
-                summary = "（为节省上下文，较早的 " + dropped.Count +
-                          " 条工具往返记录已折叠；需要其中细节时请重新读取相关文件）";
+                summary = "（为节省上下文，较早的 " + dropped.Count + " 条工具往返记录已折叠；需要其中细节时请重新读取相关文件）";
             }
             else
             {
-                summary = SummaryMarker + "（已折叠较早的 " + dropped.Count + " 条记录，以下为要点）\n" +
-                          Trim(summary, 4000);
+                summary = SummaryMarker + "（已折叠较早的 " + dropped.Count + " 条记录，以下为要点）\n" + Trim(summary, 4000);
             }
 
             // 只在摘要区**追加**一条：tailStart 之前的字节一个都不动（缓存前缀保持稳定）
@@ -1029,8 +1024,9 @@ namespace LangCode.Agent
                 _editApplied = true;
                 callbacks.OnEditApplied?.Invoke(pending);
 
-                // 改过文件后语义索引立刻失效：下一次检索重建，用户不必手动刷新
+                // 改过文件后语义索引 / 仓库地图立刻失效：下一次检索或下一轮提示重建
                 _index.Invalidate();
+                RepoMap.Invalidate();
             }
 
             return result;

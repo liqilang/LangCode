@@ -528,6 +528,57 @@ namespace LangCode.Domain.Settings
         [DataMember(Name = "semanticChunkChars", Order = 101)]
         public int SemanticChunkChars { get; set; } = 1600;
 
+        /// <summary>
+        /// 可选向量检索：Off / Ollama / OpenAI Compatible / Local ONNX
+        /// </summary>
+        [DataMember(Name = "embeddingProvider", Order = 130)]
+        public string EmbeddingProvider { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 向量端点（Ollama 默认 http://localhost:11434；OpenAI 兼容默认 https://api.openai.com/v1）
+        /// </summary>
+        [DataMember(Name = "embeddingEndpoint", Order = 131)]
+        public string EmbeddingEndpoint { get; set; } = string.Empty;
+
+        [DataMember(Name = "embeddingModel", Order = 132)]
+        public string EmbeddingModel { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 向量端点 API Key（落盘时走 DPAPI 加密；Ollama 通常留空）
+        /// </summary>
+        [DataMember(Name = "embeddingApiKey", Order = 133)]
+        public string EmbeddingApiKey { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 向量重排权重（0~100）：最终分 = (1-w)*BM25 + w*cosine
+        /// </summary>
+        [DataMember(Name = "embeddingWeightPercent", Order = 134)]
+        public int EmbeddingWeightPercent { get; set; } = 35;
+
+        /// <summary>
+        /// 本地 ONNX 模型路径（仅 Local ONNX 使用）
+        /// </summary>
+        [DataMember(Name = "embeddingModelPath", Order = 135)]
+        public string EmbeddingModelPath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 本地 ONNX WordPiece 词表路径（仅 Local ONNX 使用）
+        /// </summary>
+        [DataMember(Name = "embeddingVocabPath", Order = 136)]
+        public string EmbeddingVocabPath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 本地 ONNX 最大 token 数
+        /// </summary>
+        [DataMember(Name = "embeddingMaxTokens", Order = 137)]
+        public int EmbeddingMaxTokens { get; set; } = 256;
+
+        /// <summary>
+        /// 是否把「仓库地图」（目录 + 入口文件 + 关键符号）注入系统提示
+        /// </summary>
+        [DataMember(Name = "repoMap", Order = 138)]
+        public bool RepoMap { get; set; } = true;
+
         // ==================== 结构化编辑 ====================
         /// <summary>
         /// 是否启用结构化编辑（<c>edit_symbol</c>）：按符号名 / 括号锚点定位代码块再改写，
@@ -1023,6 +1074,32 @@ namespace LangCode.Domain.Settings
                 DocSearchResults = defaults.DocSearchResults;
             }
 
+            // 向量检索：空值与越界值兜底（失败时 SemanticIndex 会自动退回 BM25）
+            EmbeddingProvider ??= string.Empty;
+            EmbeddingEndpoint ??= string.Empty;
+            EmbeddingModel ??= string.Empty;
+            EmbeddingApiKey ??= string.Empty;
+            EmbeddingModelPath ??= string.Empty;
+            EmbeddingVocabPath ??= string.Empty;
+
+            if (EmbeddingWeightPercent < 0)
+            {
+                EmbeddingWeightPercent = 0;
+            }
+            else if (EmbeddingWeightPercent > 100)
+            {
+                EmbeddingWeightPercent = 100;
+            }
+
+            if (EmbeddingMaxTokens < 16)
+            {
+                EmbeddingMaxTokens = defaults.EmbeddingMaxTokens;
+            }
+            else if (EmbeddingMaxTokens > 512)
+            {
+                EmbeddingMaxTokens = 512;
+            }
+
             // 预算：负值没有意义，统一当成「不设预算」
             if (BudgetUsd < 0)
             {
@@ -1116,6 +1193,15 @@ namespace LangCode.Domain.Settings
             SemanticSearchResults = source.SemanticSearchResults;
             SemanticIndexMaxFiles = source.SemanticIndexMaxFiles;
             SemanticChunkChars = source.SemanticChunkChars;
+            EmbeddingProvider = source.EmbeddingProvider;
+            EmbeddingEndpoint = source.EmbeddingEndpoint;
+            EmbeddingModel = source.EmbeddingModel;
+            EmbeddingApiKey = source.EmbeddingApiKey;
+            EmbeddingWeightPercent = source.EmbeddingWeightPercent;
+            EmbeddingModelPath = source.EmbeddingModelPath;
+            EmbeddingVocabPath = source.EmbeddingVocabPath;
+            EmbeddingMaxTokens = source.EmbeddingMaxTokens;
+            RepoMap = source.RepoMap;
             StructuredEditing = source.StructuredEditing;
 
             DocSearchResults = source.DocSearchResults;
@@ -1207,6 +1293,15 @@ namespace LangCode.Domain.Settings
                 SemanticSearchResults = SemanticSearchResults,
                 SemanticIndexMaxFiles = SemanticIndexMaxFiles,
                 SemanticChunkChars = SemanticChunkChars,
+                EmbeddingProvider = EmbeddingProvider,
+                EmbeddingEndpoint = EmbeddingEndpoint,
+                EmbeddingModel = EmbeddingModel,
+                EmbeddingApiKey = EmbeddingApiKey,
+                EmbeddingWeightPercent = EmbeddingWeightPercent,
+                EmbeddingModelPath = EmbeddingModelPath,
+                EmbeddingVocabPath = EmbeddingVocabPath,
+                EmbeddingMaxTokens = EmbeddingMaxTokens,
+                RepoMap = RepoMap,
                 StructuredEditing = StructuredEditing,
                 DocSearchResults = DocSearchResults,
                 WebSearchProvider = WebSearchProvider,

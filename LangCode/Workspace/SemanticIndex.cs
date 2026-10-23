@@ -1,7 +1,10 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -94,7 +97,27 @@ namespace LangCode.Workspace
             "using", "import", "export", "function", "async", "await", "def", "self", "end",
         };
 
+        /// <summary>
+        /// 全部索引根（首个为主根）：多根工作区会把所有根一起索引
+        /// </summary>
+        private readonly IList<string> _roots;
+
+        /// <summary>
+        /// 主根（用于兼容旧逻辑 / 诊断）
+        /// </summary>
         private readonly string _root;
+
+        /// <summary>
+        /// 索引磁盘缓存路径（%LOCALAPPDATA%\LangCode\vsext\index\<root-hash>.idx.gz）
+        /// </summary>
+        private readonly string _cachePath;
+
+        /// <summary>
+        /// 缓存文件格式版本：结构变化时递增，旧缓存会被忽略
+        /// </summary>
+        private const int CacheFormatVersion = 1;
+
+        private const string CacheMagic = "LCIDX1";
 
         /// <summary>
         /// 只保护「构建任务 / 快照发布」这件事；检索本身不加锁（读的是不可变快照）
@@ -125,6 +148,12 @@ namespace LangCode.Workspace
             public double AvgSymbolLength = 1;
             public double AvgPathLength = 1;
             public DateTime BuiltAtUtc = DateTime.MinValue;
+
+            /// <summary>构建时的文件条目（用于在确认本次结果未被失效后再写缓存）</summary>
+            public List<CachedFileIndex> Files = new List<CachedFileIndex>();
+
+            /// <summary>本次构建是否产生了需要落盘的缓存变化</summary>
+            public bool CacheChanged;
         }
 
         private volatile IndexSnapshot _snapshot;
@@ -149,9 +178,85 @@ namespace LangCode.Workspace
         /// </summary>
         private static readonly TimeSpan RebuildDelay = TimeSpan.FromSeconds(3);
 
-        public SemanticIndex(string root)
+        public SemanticIndex(string root) : this(root, null)
         {
-            _root = (root ?? string.Empty).TrimEnd('\\', '/');
+        }
+
+        /// <summary>
+        /// 多根工作区：除主根外还会索引 <paramref name="extraRoots"/> 里的源码
+        /// </summary>
+        public SemanticIndex(string root, IEnumerable<string> extraRoots)
+        {
+            var roots = new List<string>();
+            AddRoot(roots, root);
+
+            if (extraRoots != null)
+            {
+                foreach (var extra in extraRoots)
+                {
+                    AddRoot(roots, extra);
+                }
+            }
+
+            _roots = roots;
+            _root = roots.Count > 0 ? roots[0] : string.Empty;
+            _cachePath = BuildCachePath(roots);
+        }
+
+        private static void AddRoot(IList<string> roots, string candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                return;
+            }
+
+            try
+            {
+                var full = Path.GetFullPath(candidate).TrimEnd('\\', '/');
+                if (full.Length > 0 && !roots.Any(existing => string.Equals(existing, full, StringComparison.OrdinalIgnoreCase)))
+                {
+                    roots.Add(full);
+                }
+            }
+            catch (Exception)
+            {
+                // 非法路径：忽略该根，不让整个索引不可用
+            }
+        }
+
+        /// <summary>
+        /// 全部索引根（首个为主根）
+        /// </summary>
+        public IList<string> Roots => _roots;
+
+        /// <summary>
+        /// 索引磁盘缓存位置（诊断用；未启用持久化时可能为 null）
+        /// </summary>
+        public string CachePath => _cachePath;
+
+        private static string BuildCachePath(IList<string> roots)
+        {
+            if (roots == null || roots.Count == 0)
+            {
+                return null;
+            }
+
+            try
+            {
+                var key = string.Join("|", roots.Select(r => r.ToLowerInvariant()));
+                using (var sha = SHA1.Create())
+                {
+                    var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(key));
+                    var name = BitConverter.ToString(hash).Replace("-", string.Empty).Substring(0, 16);
+                    return Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "LangCode", "vsext", "index", name + ".idx.gz");
+                }
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         /// <summary>
@@ -169,7 +274,26 @@ namespace LangCode.Workspace
         /// </summary>
         public int MaxFileChars { get; set; } = 200_000;
 
-        public bool IsReady => _root.Length > 0 && Directory.Exists(_root);
+        /// <summary>
+        /// 可选向量检索：BM25 先召回候选，再用 embedding 重排；未配置时保持纯 BM25F
+        /// </summary>
+        public EmbeddingOptions Embedding { get; set; } = new EmbeddingOptions();
+
+        private IEmbeddingProvider _embeddingProvider;
+        private string _embeddingSignature = string.Empty;
+        private DateTime _embeddingRetryAfterUtc = DateTime.MinValue;
+        private readonly object _embeddingGate = new object();
+
+        private Task _vectorIndexTask;
+        private string _vectorIndexSignature = string.Empty;
+        private readonly object _vectorIndexGate = new object();
+
+        /// <summary>
+        /// 片段文本哈希 → 向量（只缓存候选片段的向量，避免把整个仓库都嵌入一遍）
+        /// </summary>
+        private readonly ConcurrentDictionary<string, float[]> _vectorCache = new ConcurrentDictionary<string, float[]>(StringComparer.Ordinal);
+
+        public bool IsReady => _roots != null && _roots.Any(Directory.Exists);
 
         /// <summary>
         /// 是否正在后台建索引（界面 / 自检可据此显示进度）
@@ -361,15 +485,25 @@ namespace LangCode.Workspace
                 return Ok("没有找到相关代码片段（可换个关键词，或先用 search_text 精确匹配）");
             }
 
-            var ranked = scores
+            // BM25 先多召回一些候选，再交给可选的 embedding 重排（只对候选做向量，成本可控）
+            var candidates = scores
                 .OrderByDescending(kv => kv.Value)
                 .ThenBy(kv => chunks[kv.Key].Path, StringComparer.OrdinalIgnoreCase)
-                .Take(top)
+                .Take(Math.Max(top * 4, 24))
                 .ToList();
+
+            var ranked = RerankWithEmbeddings(queryText, chunks, candidates, top, out var embeddingNote, out var embeddingUsed);
 
             var builder = new StringBuilder();
             builder.Append("混合检索结果（“").Append((query ?? string.Empty).Trim()).Append("”，共 ")
-                   .Append(ranked.Count).Append(" 段，正文 / 符号 / 路径三路加权）：\n\n");
+                   .Append(ranked.Count).Append(embeddingUsed
+                       ? " 段，正文 / 符号 / 路径三路加权 + 向量重排）：\n\n"
+                       : " 段，正文 / 符号 / 路径三路加权）：\n\n");
+
+            if (!string.IsNullOrWhiteSpace(embeddingNote))
+            {
+                builder.Append(embeddingNote).Append("\n\n");
+            }
 
             var rank = 0;
             foreach (var entry in ranked)
@@ -392,6 +526,319 @@ namespace LangCode.Workspace
 
             builder.Append("提示：需要完整内容时用 read_file 读取上面对应的文件与行号");
             return Ok(builder.ToString());
+        }
+
+        /// <summary>
+        /// 可选向量重排：BM25 候选 → 逐条 embedding → 余弦相似度与 BM25 归一化分融合。
+        /// 未配置 / 端点不可用 / 调用失败时原样返回 BM25 结果，并给出一句可读的回退说明。
+        /// </summary>
+        private IList<KeyValuePair<int, double>> RerankWithEmbeddings(
+            string queryText,
+            IList<CodeChunk> chunks,
+            IList<KeyValuePair<int, double>> candidates,
+            int top,
+            out string note,
+            out bool used)
+        {
+            note = string.Empty;
+            used = false;
+
+            var options = Embedding;
+            if (options == null || !options.IsEnabled || candidates.Count <= 1)
+            {
+                return candidates.Take(top).ToList();
+            }
+
+            if (DateTime.UtcNow < _embeddingRetryAfterUtc)
+            {
+                note = "（向量重排暂时冷却：上次调用失败，稍后自动重试；已回退 BM25）";
+                return candidates.Take(top).ToList();
+            }
+
+            var provider = GetEmbeddingProvider();
+            if (provider == null || !provider.IsAvailable)
+            {
+                note = "（向量检索不可用：" + (provider?.LastError ?? "未配置") + "；已回退 BM25）";
+                return candidates.Take(top).ToList();
+            }
+
+            try
+            {
+#pragma warning disable VSTHRD002
+                var queryVector = provider
+                    .EmbedAsync(new[] { queryText }, CancellationToken.None)
+                    .GetAwaiter().GetResult()?
+                    .FirstOrDefault();
+#pragma warning restore VSTHRD002
+
+                if (queryVector == null || queryVector.Length == 0)
+                {
+                    throw new InvalidOperationException("查询向量为空");
+                }
+
+                // 只为还没有向量的候选补一次批量 embedding
+                var missing = new List<KeyValuePair<int, double>>();
+                foreach (var candidate in candidates)
+                {
+                    if (!_vectorCache.ContainsKey(VectorKey(chunks[candidate.Key])))
+                    {
+                        missing.Add(candidate);
+                    }
+                }
+
+                if (missing.Count > 0)
+                {
+                    var texts = missing.Select(item => EmbedText(chunks[item.Key])).ToList();
+#pragma warning disable VSTHRD002
+                    var vectors = provider
+                        .EmbedAsync(texts, CancellationToken.None)
+                        .GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
+
+                    for (var i = 0; i < missing.Count && i < vectors.Count; i++)
+                    {
+                        if (vectors[i] != null && vectors[i].Length > 0)
+                        {
+                            _vectorCache[VectorKey(chunks[missing[i].Key])] = vectors[i];
+                        }
+                    }
+
+                    // 简单容量保护：向量只用于当前会话，过多时整体丢弃重建
+                    if (_vectorCache.Count > 5000)
+                    {
+                        _vectorCache.Clear();
+                    }
+                }
+
+                // 后台慢慢把更多片段也嵌入：后续查询就能做「向量召回」，
+                // 不再局限于 BM25 已经召回的候选
+                StartVectorIndexBuild(chunks, provider, options);
+
+                var maxBm25 = candidates.Max(item => item.Value);
+                var weight = Math.Max(0, Math.Min(1, options.Weight));
+                var fused = new Dictionary<int, double>(candidates.Count);
+
+                foreach (var candidate in candidates)
+                {
+                    var chunk = chunks[candidate.Key];
+                    if (!_vectorCache.TryGetValue(VectorKey(chunk), out var vector))
+                    {
+                        continue;
+                    }
+
+                    var bm25 = maxBm25 > 0 ? candidate.Value / maxBm25 : 0;
+                    var cosine = Cosine(queryVector, vector);
+                    var semantic = (cosine + 1.0) / 2.0; // [-1,1] → [0,1]
+
+                    fused[candidate.Key] = ((1 - weight) * bm25) + (weight * semantic);
+                }
+
+                // 向量召回：只补 BM25 没覆盖到的片段（余弦太低的不进结果，避免噪声）
+                for (var i = 0; i < chunks.Count; i++)
+                {
+                    if (fused.ContainsKey(i))
+                    {
+                        continue;
+                    }
+
+                    if (!_vectorCache.TryGetValue(VectorKey(chunks[i]), out var vector))
+                    {
+                        continue;
+                    }
+
+                    var cosine = Cosine(queryVector, vector);
+                    if (cosine >= 0.15)
+                    {
+                        fused[i] = weight * ((cosine + 1.0) / 2.0);
+                    }
+                }
+
+                if (fused.Count == 0)
+                {
+                    return candidates.Take(top).ToList();
+                }
+
+                used = true;
+                _embeddingRetryAfterUtc = DateTime.MinValue;
+                return fused
+                    .OrderByDescending(item => item.Value)
+                    .ThenBy(item => chunks[item.Key].Path, StringComparer.OrdinalIgnoreCase)
+                    .Take(top)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                // 端点不可达 / 限流时不反复打：冷却 2 分钟，期间直接走 BM25
+                _embeddingRetryAfterUtc = DateTime.UtcNow.AddMinutes(2);
+                note = "（向量重排失败，已回退 BM25：" + ex.GetBaseException().Message + "）";
+                return candidates.Take(top).ToList();
+            }
+        }
+
+        /// <summary>
+        /// 后台分批为片段建立向量（最多 <see cref="EmbeddingOptions.MaxChunks"/> 个）。
+        /// 不阻塞当前检索：本次先用已有向量，之后的查询逐步获得完整的向量召回。
+        /// </summary>
+        private void StartVectorIndexBuild(IList<CodeChunk> chunks, IEmbeddingProvider provider, EmbeddingOptions options)
+        {
+            if (chunks == null || provider == null || options == null || options.MaxChunks <= 0)
+            {
+                return;
+            }
+
+            var signature = _embeddingSignature;
+            lock (_vectorIndexGate)
+            {
+                if (_vectorIndexTask != null &&
+                    (string.Equals(_vectorIndexSignature, signature, StringComparison.Ordinal) || !_vectorIndexTask.IsCompleted))
+                {
+                    return;
+                }
+
+                _vectorIndexSignature = signature;
+                _vectorIndexTask = Task.Run(() => BuildVectorIndex(chunks, provider, options));
+            }
+        }
+
+        private void BuildVectorIndex(IList<CodeChunk> chunks, IEmbeddingProvider provider, EmbeddingOptions options)
+        {
+            try
+            {
+                var limit = Math.Min(chunks.Count, Math.Max(1, options.MaxChunks));
+                var batch = new List<CodeChunk>(16);
+
+                for (var i = 0; i < limit; i++)
+                {
+                    var chunk = chunks[i];
+                    if (_vectorCache.ContainsKey(VectorKey(chunk)))
+                    {
+                        continue;
+                    }
+
+                    batch.Add(chunk);
+                    if (batch.Count >= 16)
+                    {
+                        FlushVectorBatch(batch, provider);
+                        batch.Clear();
+                    }
+                }
+
+                if (batch.Count > 0)
+                {
+                    FlushVectorBatch(batch, provider);
+                }
+            }
+            catch (Exception)
+            {
+                // 后台建向量失败不影响检索：下次换配置或重启再试
+            }
+        }
+
+        private void FlushVectorBatch(IList<CodeChunk> batch, IEmbeddingProvider provider)
+        {
+            try
+            {
+                var texts = batch.Select(EmbedText).ToList();
+#pragma warning disable VSTHRD002
+                var vectors = provider
+                    .EmbedAsync(texts, CancellationToken.None)
+                    .GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
+
+                for (var i = 0; i < batch.Count && i < vectors.Count; i++)
+                {
+                    if (vectors[i] != null && vectors[i].Length > 0)
+                    {
+                        _vectorCache[VectorKey(batch[i])] = vectors[i];
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // 单批失败：停止后台建索引（由 _vectorIndexTask 的完成状态避免反复重试）
+                throw;
+            }
+        }
+
+        private IEmbeddingProvider GetEmbeddingProvider()
+        {
+            var options = Embedding;
+            if (options == null || !options.IsEnabled)
+            {
+                return null;
+            }
+
+            var signature = string.Join("|", new[]
+            {
+                options.Provider ?? string.Empty,
+                options.Endpoint ?? string.Empty,
+                options.Model ?? string.Empty,
+                options.ModelPath ?? string.Empty,
+                options.VocabPath ?? string.Empty,
+                options.MaxTokens.ToString(),
+            });
+
+            lock (_embeddingGate)
+            {
+                if (_embeddingProvider != null && string.Equals(_embeddingSignature, signature, StringComparison.Ordinal))
+                {
+                    return _embeddingProvider;
+                }
+
+                try
+                {
+                    _embeddingProvider?.Dispose();
+                }
+                catch (Exception)
+                {
+                    // 旧 provider 释放失败不影响新建
+                }
+
+                _embeddingSignature = signature;
+                _embeddingProvider = EmbeddingProviderFactory.Create(options);
+                _embeddingRetryAfterUtc = DateTime.MinValue;
+                _vectorCache.Clear();
+                return _embeddingProvider;
+            }
+        }
+
+        private static string VectorKey(CodeChunk chunk)
+        {
+            return StableHash((chunk.Path ?? string.Empty) + "\u0001" + (chunk.Symbol ?? string.Empty) + "\u0001" + (chunk.Text ?? string.Empty))
+                .ToString("x16");
+        }
+
+        private static string EmbedText(CodeChunk chunk)
+        {
+            var text = (chunk.Path ?? string.Empty) + "\n" + (chunk.Symbol ?? string.Empty) + "\n" + (chunk.Text ?? string.Empty);
+            return text.Length <= 2000 ? text : text.Substring(0, 2000);
+        }
+
+        private static double Cosine(float[] left, float[] right)
+        {
+            if (left == null || right == null || left.Length == 0 || right.Length == 0)
+            {
+                return 0;
+            }
+
+            var length = Math.Min(left.Length, right.Length);
+            double dot = 0;
+            double leftNorm = 0;
+            double rightNorm = 0;
+
+            for (var i = 0; i < length; i++)
+            {
+                dot += left[i] * right[i];
+                leftNorm += left[i] * left[i];
+                rightNorm += right[i] * right[i];
+            }
+
+            if (leftNorm <= 0.0000001 || rightNorm <= 0.0000001)
+            {
+                return 0;
+            }
+
+            return dot / (Math.Sqrt(leftNorm) * Math.Sqrt(rightNorm));
         }
 
         /// <summary>
@@ -595,9 +1042,16 @@ namespace LangCode.Workspace
             var generation = Volatile.Read(ref _generation);
             var snapshot = BuildSnapshot();
 
+            // 构建期间文件又被改过：丢弃本次结果，也**不要**写缓存
+            // （否则旧快照可能覆盖并发构建刚写好的新缓存）
             if (Volatile.Read(ref _generation) != generation)
             {
                 return;
+            }
+
+            if (snapshot.CacheChanged)
+            {
+                SaveCache(snapshot.Files);
             }
 
             _snapshot = snapshot;
@@ -608,21 +1062,95 @@ namespace LangCode.Workspace
             var chunks = new List<CodeChunk>();
             var symbols = new List<SymbolNode>();
 
+            // 先尝试磁盘缓存：只对「mtime / size 变了」的文件重新读取与分块，
+            // 未变化的文件直接复用上次的片段与符号（大仓库冷启动的主要收益）
+            var cachedFiles = TryLoadCache();
+            var cachedByKey = new Dictionary<string, CachedFileIndex>(StringComparer.OrdinalIgnoreCase);
+            if (cachedFiles != null)
+            {
+                foreach (var entry in cachedFiles)
+                {
+                    cachedByKey[entry.RootIndex + "|" + entry.RelativePath] = entry;
+                }
+            }
+
+            var fileEntries = new List<CachedFileIndex>();
+            var changed = cachedFiles == null || cachedFiles.Count == 0;
+
             foreach (var file in EnumerateSourceFiles())
             {
-                string text;
+                FileInfo info;
                 try
                 {
-                    text = ReadTextCapped(file);
+                    info = new FileInfo(file.FullPath);
+                    if (!info.Exists)
+                    {
+                        continue;
+                    }
                 }
                 catch (Exception)
                 {
                     continue;
                 }
 
-                var relative = Relative(file);
-                CollectSymbols(relative, text, symbols);
-                chunks.AddRange(ChunkFile(relative, text));
+                var key = file.RootIndex + "|" + file.RelativePath;
+                cachedByKey.TryGetValue(key, out var cachedEntry);
+
+                // 版本没变：直接复用缓存里的片段与符号
+                if (cachedEntry != null && cachedEntry.Size == info.Length && cachedEntry.LastWriteTicks == info.LastWriteTimeUtc.Ticks)
+                {
+                    fileEntries.Add(cachedEntry);
+                    chunks.AddRange(cachedEntry.Chunks);
+                    symbols.AddRange(cachedEntry.Symbols);
+                    continue;
+                }
+
+                string text;
+                try
+                {
+                    text = ReadTextCapped(file.FullPath);
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+
+                var hash = StableHash(text);
+
+                // mtime 变了但内容没变（保存时只动了时间戳）：复用旧片段，只更新时间戳
+                if (cachedEntry != null && cachedEntry.Hash == hash)
+                {
+                    cachedEntry.Size = info.Length;
+                    cachedEntry.LastWriteTicks = info.LastWriteTimeUtc.Ticks;
+                    fileEntries.Add(cachedEntry);
+                    chunks.AddRange(cachedEntry.Chunks);
+                    symbols.AddRange(cachedEntry.Symbols);
+                    changed = true;
+                    continue;
+                }
+
+                var fresh = new CachedFileIndex
+                {
+                    RootIndex = file.RootIndex,
+                    RelativePath = file.RelativePath,
+                    Size = info.Length,
+                    LastWriteTicks = info.LastWriteTimeUtc.Ticks,
+                    Hash = hash,
+                };
+
+                CollectSymbols(file.RelativePath, text, fresh.Symbols);
+                fresh.Chunks.AddRange(ChunkFile(file.RelativePath, text));
+
+                fileEntries.Add(fresh);
+                chunks.AddRange(fresh.Chunks);
+                symbols.AddRange(fresh.Symbols);
+                changed = true;
+            }
+
+            // 文件被删掉也会让缓存条目数量变化
+            if (cachedFiles != null && cachedFiles.Count != fileEntries.Count)
+            {
+                changed = true;
             }
 
             // 正文字段倒排：词 → 片段下标
@@ -686,6 +1214,8 @@ namespace LangCode.Workspace
             return new IndexSnapshot
             {
                 Chunks = chunks,
+                Files = fileEntries,
+                CacheChanged = changed,
                 Postings = postings,
                 DocumentFrequency = df,
                 SymbolPostings = symbolPostings,
@@ -1007,64 +1537,113 @@ namespace LangCode.Workspace
             return value.Length <= 1200 ? value : value.Substring(0, 1200) + "\n…（片段过长，已截断；请用 read_file 读取完整内容）";
         }
 
-        // ==================== 文件枚举 ====================
+        // ==================== 文件枚举 / 位置 ====================
 
-        private IEnumerable<string> EnumerateSourceFiles()
+        /// <summary>
+        /// 枚举到的一个源文件（根序号 + 完整路径 + 根内相对路径）
+        /// </summary>
+        private sealed class SourceFile
+        {
+            public int RootIndex;
+            public string FullPath = string.Empty;
+            public string RelativePath = string.Empty;
+        }
+
+        /// <summary>
+        /// 磁盘缓存里的一个文件条目：版本信息 + 上次切好的片段与符号
+        /// </summary>
+        private sealed class CachedFileIndex
+        {
+            public int RootIndex;
+            public string RelativePath = string.Empty;
+            public long LastWriteTicks;
+            public long Size;
+            public ulong Hash;
+            public List<CodeChunk> Chunks = new List<CodeChunk>();
+            public List<SymbolNode> Symbols = new List<SymbolNode>();
+        }
+
+        private IEnumerable<SourceFile> EnumerateSourceFiles()
         {
             var count = 0;
-            var pending = new Queue<string>();
-            pending.Enqueue(_root);
 
-            while (pending.Count > 0)
+            for (var rootIndex = 0; rootIndex < _roots.Count; rootIndex++)
             {
-                var current = pending.Dequeue();
-
-                string[] directories;
-                try
-                {
-                    directories = Directory.GetDirectories(current);
-                }
-                catch (Exception)
-                {
-                    directories = new string[0];
-                }
-
-                foreach (var directory in directories)
-                {
-                    var name = Path.GetFileName(directory);
-                    if (IgnoredDirectories.Contains(name, StringComparer.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    pending.Enqueue(directory);
-                }
-
-                string[] files;
-                try
-                {
-                    files = Directory.GetFiles(current);
-                }
-                catch (Exception)
+                var root = _roots[rootIndex];
+                if (!Directory.Exists(root))
                 {
                     continue;
                 }
 
-                foreach (var file in files)
+                var pending = new Queue<string>();
+                pending.Enqueue(root);
+
+                while (pending.Count > 0)
                 {
-                    if (!SourceExtensions.Contains(Path.GetExtension(file)))
+                    var current = pending.Dequeue();
+
+                    string[] directories;
+                    try
+                    {
+                        directories = Directory.GetDirectories(current);
+                        Array.Sort(directories, StringComparer.OrdinalIgnoreCase);
+                    }
+                    catch (Exception)
+                    {
+                        directories = Array.Empty<string>();
+                    }
+
+                    foreach (var directory in directories)
+                    {
+                        var name = Path.GetFileName(directory);
+                        if (IgnoredDirectories.Contains(name, StringComparer.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        pending.Enqueue(directory);
+                    }
+
+                    string[] files;
+                    try
+                    {
+                        files = Directory.GetFiles(current);
+                        Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+                    }
+                    catch (Exception)
                     {
                         continue;
                     }
 
-                    if (++count > MaxFiles)
+                    foreach (var file in files)
                     {
-                        yield break;
-                    }
+                        if (!SourceExtensions.Contains(Path.GetExtension(file)))
+                        {
+                            continue;
+                        }
 
-                    yield return file;
+                        if (++count > MaxFiles)
+                        {
+                            yield break;
+                        }
+
+                        yield return new SourceFile
+                        {
+                            RootIndex = rootIndex,
+                            FullPath = file,
+                            RelativePath = RelativeTo(file, root),
+                        };
+                    }
                 }
             }
+        }
+
+        private static string RelativeTo(string full, string root)
+        {
+            var prefix = root.TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+            return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                ? full.Substring(prefix.Length).Replace(Path.DirectorySeparatorChar, '/')
+                : full.Replace(Path.DirectorySeparatorChar, '/');
         }
 
         private string ReadTextCapped(string full)
@@ -1078,12 +1657,244 @@ namespace LangCode.Workspace
             }
         }
 
-        private string Relative(string full)
+        /// <summary>
+        /// FNV-1a 64 位：只用于判断文件内容是否变化，不做安全用途
+        /// </summary>
+        private static ulong StableHash(string text)
         {
-            var prefix = _root + Path.DirectorySeparatorChar;
-            return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                ? full.Substring(prefix.Length).Replace(Path.DirectorySeparatorChar, '/')
-                : full.Replace(Path.DirectorySeparatorChar, '/');
+            const ulong offset = 14695981039346656037UL;
+            const ulong prime = 1099511628211UL;
+
+            var hash = offset;
+            var value = text ?? string.Empty;
+            for (var i = 0; i < value.Length; i++)
+            {
+                hash ^= value[i];
+                hash *= prime;
+            }
+
+            return hash;
+        }
+
+        // ==================== 索引磁盘缓存 ====================
+
+        private List<CachedFileIndex> TryLoadCache()
+        {
+            if (string.IsNullOrEmpty(_cachePath) || !File.Exists(_cachePath))
+            {
+                return null;
+            }
+
+            try
+            {
+                using (var stream = new FileStream(_cachePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var gzip = new GZipStream(stream, CompressionMode.Decompress))
+                using (var reader = new BinaryReader(gzip, Encoding.UTF8))
+                {
+                    if (!string.Equals(reader.ReadString(), CacheMagic, StringComparison.Ordinal) ||
+                        reader.ReadInt32() != CacheFormatVersion ||
+                        reader.ReadInt32() != MaxFiles ||
+                        reader.ReadInt32() != MaxChunkChars)
+                    {
+                        return null;
+                    }
+
+                    var rootCount = reader.ReadInt32();
+                    if (rootCount != _roots.Count)
+                    {
+                        return null;
+                    }
+
+                    for (var i = 0; i < rootCount; i++)
+                    {
+                        if (!string.Equals(reader.ReadString(), _roots[i], StringComparison.OrdinalIgnoreCase))
+                        {
+                            return null;
+                        }
+                    }
+
+                    var fileCount = reader.ReadInt32();
+                    if (fileCount < 0 || fileCount > MaxFiles + 1000)
+                    {
+                        return null;
+                    }
+
+                    var result = new List<CachedFileIndex>(fileCount);
+                    for (var i = 0; i < fileCount; i++)
+                    {
+                        var entry = new CachedFileIndex
+                        {
+                            RootIndex = reader.ReadInt32(),
+                            RelativePath = reader.ReadString() ?? string.Empty,
+                            LastWriteTicks = reader.ReadInt64(),
+                            Size = reader.ReadInt64(),
+                            Hash = reader.ReadUInt64(),
+                        };
+
+                        var symbolCount = reader.ReadInt32();
+                        if (symbolCount < 0 || symbolCount > 100000)
+                        {
+                            return null;
+                        }
+
+                        for (var s = 0; s < symbolCount; s++)
+                        {
+                            var symbol = new SymbolNode
+                            {
+                                Name = reader.ReadString() ?? string.Empty,
+                                Kind = reader.ReadString() ?? string.Empty,
+                                Path = entry.RelativePath,
+                                Line = reader.ReadInt32(),
+                            };
+
+                            var baseCount = reader.ReadInt32();
+                            if (baseCount < 0 || baseCount > 1000)
+                            {
+                                return null;
+                            }
+
+                            for (var b = 0; b < baseCount; b++)
+                            {
+                                symbol.Bases.Add(reader.ReadString() ?? string.Empty);
+                            }
+
+                            entry.Symbols.Add(symbol);
+                        }
+
+                        var chunkCount = reader.ReadInt32();
+                        if (chunkCount < 0 || chunkCount > 200000)
+                        {
+                            return null;
+                        }
+
+                        for (var c = 0; c < chunkCount; c++)
+                        {
+                            entry.Chunks.Add(new CodeChunk
+                            {
+                                Path = entry.RelativePath,
+                                StartLine = reader.ReadInt32(),
+                                EndLine = reader.ReadInt32(),
+                                Symbol = reader.ReadString() ?? string.Empty,
+                                Kind = reader.ReadString() ?? string.Empty,
+                                Text = reader.ReadString() ?? string.Empty,
+                            });
+                        }
+
+                        result.Add(entry);
+                    }
+
+                    return result;
+                }
+            }
+            catch (Exception)
+            {
+                // 缓存损坏 / 版本不符 / 被占用：当作没有缓存，下次重建后覆盖
+                return null;
+            }
+        }
+
+        private void SaveCache(IList<CachedFileIndex> files)
+        {
+            var path = _cachePath;
+            if (string.IsNullOrEmpty(path))
+            {
+                return;
+            }
+
+            string temp = null;
+            try
+            {
+                var directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+
+                using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+                using (var gzip = new GZipStream(stream, CompressionMode.Compress))
+                using (var writer = new BinaryWriter(gzip, Encoding.UTF8))
+                {
+                    writer.Write(CacheMagic);
+                    writer.Write(CacheFormatVersion);
+                    writer.Write(MaxFiles);
+                    writer.Write(MaxChunkChars);
+
+                    writer.Write(_roots.Count);
+                    foreach (var root in _roots)
+                    {
+                        writer.Write(root);
+                    }
+
+                    var list = files ?? Array.Empty<CachedFileIndex>();
+                    writer.Write(list.Count);
+
+                    foreach (var file in list)
+                    {
+                        writer.Write(file.RootIndex);
+                        writer.Write(file.RelativePath ?? string.Empty);
+                        writer.Write(file.LastWriteTicks);
+                        writer.Write(file.Size);
+                        writer.Write(file.Hash);
+
+                        writer.Write(file.Symbols.Count);
+                        foreach (var symbol in file.Symbols)
+                        {
+                            writer.Write(symbol.Name ?? string.Empty);
+                            writer.Write(symbol.Kind ?? string.Empty);
+                            writer.Write(symbol.Line);
+                            writer.Write(symbol.Bases.Count);
+                            foreach (var baseName in symbol.Bases)
+                            {
+                                writer.Write(baseName ?? string.Empty);
+                            }
+                        }
+
+                        writer.Write(file.Chunks.Count);
+                        foreach (var chunk in file.Chunks)
+                        {
+                            writer.Write(chunk.StartLine);
+                            writer.Write(chunk.EndLine);
+                            writer.Write(chunk.Symbol ?? string.Empty);
+                            writer.Write(chunk.Kind ?? string.Empty);
+                            writer.Write(chunk.Text ?? string.Empty);
+                        }
+                    }
+                }
+
+                if (File.Exists(path))
+                {
+                    File.Replace(temp, path, null, ignoreMetadataErrors: true);
+                }
+                else
+                {
+                    File.Move(temp, path);
+                }
+
+                temp = null;
+            }
+            catch (Exception)
+            {
+                // 缓存写失败不影响检索：下次构建会再尝试
+            }
+            finally
+            {
+                if (temp != null)
+                {
+                    try
+                    {
+                        if (File.Exists(temp))
+                        {
+                            File.Delete(temp);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // 清理失败不影响主流程
+                    }
+                }
+            }
         }
 
         private static ToolResult Ok(string output)

@@ -619,20 +619,27 @@ namespace LangCode.Ui.ToolWindows
             var maxFiles = _settings?.SemanticIndexMaxFiles ?? 2000;
             var maxChunkChars = _settings?.SemanticChunkChars ?? 1600;
 
+            // 多根工作区：索引全部根；用拼接后的根集合做「是否需要重建」的键
+            var roots = _workspace?.Roots != null && _workspace.Roots.Count > 0 ? _workspace.Roots : new List<string> { root };
+            var rootsKey = string.Join("|", roots.Select(r => r.ToLowerInvariant()));
+
             if (_semanticIndex == null ||
-                !string.Equals(_semanticIndexRoot, root, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(_semanticIndexRoot, rootsKey, StringComparison.OrdinalIgnoreCase) ||
                 maxFiles != _semanticIndexMaxFiles ||
                 maxChunkChars != _semanticIndexMaxChunkChars)
             {
-                _semanticIndex = new SemanticIndex(root)
+                _semanticIndex = new SemanticIndex(root, roots)
                 {
                     MaxFiles = maxFiles,
                     MaxChunkChars = maxChunkChars,
                 };
-                _semanticIndexRoot = root;
+                _semanticIndexRoot = rootsKey;
                 _semanticIndexMaxFiles = maxFiles;
                 _semanticIndexMaxChunkChars = maxChunkChars;
             }
+
+            // 向量检索配置跟随设置热更新（签名没变时是空操作）
+            _semanticIndex.Embedding = EmbeddingOptions.FromSettings(_settings);
 
             // 设置里关掉语义索引时不预热（工具调用本来也会拒绝）
             if (_settings == null || _settings.SemanticIndex)

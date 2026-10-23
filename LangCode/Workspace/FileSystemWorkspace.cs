@@ -133,6 +133,20 @@ namespace LangCode.Workspace
             public bool Truncated;
         }
 
+        /// <summary>
+        /// 按 (文件, 行区间) 缓存的格式化结果：模型常反复读同一段，避免每次都重新切行 / 拼行号
+        /// </summary>
+        private sealed class CachedFileRange
+        {
+            public DateTime LastWriteUtc;
+            public long Length;
+            public string Text = string.Empty;
+        }
+
+        private readonly Dictionary<string, CachedFileRange> _rangeCache = new Dictionary<string, CachedFileRange>(StringComparer.OrdinalIgnoreCase);
+
+        private const int MaxCachedRanges = 256;
+
         private readonly object _textCacheGate = new object();
         private readonly Dictionary<string, CachedFileText> _textCache =
             new Dictionary<string, CachedFileText>(StringComparer.OrdinalIgnoreCase);
@@ -465,33 +479,259 @@ namespace LangCode.Workspace
                     return Fail("文件不存在：" + relativePath);
                 }
 
+                // 区间级缓存：同一文件 + 同一行范围，版本没变就直接复用上次格式化好的结果
+                var rangeKey = full + "|" + (startLine?.ToString() ?? "auto") + ":" + (endLine?.ToString() ?? "auto");
+                FileInfo info = null;
+                try
+                {
+                    info = new FileInfo(full);
+                }
+                catch (Exception)
+                {
+                    // 拿不到版本信息就不走缓存
+                }
+
+                if (info != null)
+                {
+                    lock (_textCacheGate)
+                    {
+                        if (_rangeCache.TryGetValue(rangeKey, out var cachedRange) &&
+                            cachedRange.LastWriteUtc == info.LastWriteTimeUtc &&
+                            cachedRange.Length == info.Length)
+                        {
+                            return Ok(cachedRange.Text);
+                        }
+                    }
+                }
+
                 var text = ReadTextCapped(full, out var truncated);
-                var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+                var explicitRange = startLine != null || endLine != null;
+                string output;
 
-                var from = Math.Max(1, startLine ?? 1);
-                var to = Math.Min(lines.Length, endLine ?? lines.Length);
-                if (from > to)
+                // 超大文件 + 显式行范围：直接从磁盘按行流式读取，
+                // 不受 MaxFileChars 前缀限制（否则大纲里建议的 3000 行根本读不到）
+                if (truncated && explicitRange)
                 {
-                    return Fail("行范围无效：" + from + "-" + to);
+                    var rangeFrom = Math.Max(1, startLine ?? 1);
+                    output = ReadLineRange(full, rangeFrom, endLine, out var totalLines);
+                    if (output == null)
+                    {
+                        return Fail("行范围超出文件末尾：" + rangeFrom +
+                                    (endLine.HasValue ? "-" + endLine.Value : string.Empty) +
+                                    "（文件约 " + totalLines + " 行）");
+                    }
+                }
+                // 超大文件且没有指定行范围：返回「符号大纲 + 建议区间」，
+                // 而不是只给前 40000 字符（那样模型拿到的是半截实现，反而更费 token）
+                else if (truncated)
+                {
+                    output = BuildLargeFileOutline(full, text);
+                }
+                else
+                {
+                    var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+                    var from = Math.Max(1, startLine ?? 1);
+                    var to = Math.Min(lines.Length, endLine ?? lines.Length);
+                    if (from > to)
+                    {
+                        return Fail("行范围无效：" + from + "-" + to);
+                    }
+
+                    var builder = new StringBuilder();
+                    for (var i = from; i <= to; i++)
+                    {
+                        builder.Append(i).Append(": ").Append(lines[i - 1]).Append('\n');
+                    }
+
+                    output = builder.ToString();
                 }
 
-                var builder = new StringBuilder();
-                for (var i = from; i <= to; i++)
+                if (info != null)
                 {
-                    builder.Append(i).Append(": ").Append(lines[i - 1]).Append('\n');
+                    lock (_textCacheGate)
+                    {
+                        if (_rangeCache.Count >= MaxCachedRanges)
+                        {
+                            _rangeCache.Clear();
+                        }
+
+                        _rangeCache[rangeKey] = new CachedFileRange
+                        {
+                            LastWriteUtc = info.LastWriteTimeUtc,
+                            Length = info.Length,
+                            Text = output,
+                        };
+                    }
                 }
 
-                if (truncated)
-                {
-                    builder.Append("[已截断：文件超过 ").Append(MaxFileChars).Append(" 字符；请改用 start_line / end_line 分段读取需要的部分]\n");
-                }
-
-                return Ok(builder.ToString());
+                return Ok(output);
             }
             catch (Exception ex)
             {
                 return Fail(ex.Message);
             }
+        }
+
+        /// <summary>
+        /// 超大文件的符号大纲：扫描前 2MB 的符号并给出建议分页区间
+        /// </summary>
+        private static string BuildLargeFileOutline(string full, string cappedText)
+        {
+            const int OutlineMaxChars = 2_000_000;
+            var outlineText = cappedText ?? string.Empty;
+            var scannedAll = false;
+
+            try
+            {
+                var length = new FileInfo(full).Length;
+                scannedAll = length <= OutlineMaxChars;
+                outlineText = ReadTextPrefix(full, OutlineMaxChars);
+            }
+            catch (Exception)
+            {
+                // 读不到就只用已读到的前缀
+            }
+
+            var symbols = SymbolScanner.Scan(outlineText, 160);
+            var totalLines = CountLinesCapped(full, 200000);
+
+            var builder = new StringBuilder();
+            builder.Append("[文件较大：");
+            builder.Append(totalLines >= 200000 ? "超过 200000 行" : "约 " + totalLines + " 行");
+            builder.Append("；未指定行范围，已返回符号大纲");
+            if (!scannedAll && outlineText.Length >= OutlineMaxChars)
+            {
+                builder.Append("（仅扫描前 2MB）");
+            }
+
+            builder.Append("]\n");
+
+            if (symbols.Count == 0)
+            {
+                builder.Append("（未识别到符号；建议按行范围分页读取）\n");
+            }
+            else
+            {
+                foreach (var symbol in symbols.Take(80))
+                {
+                    builder.Append("  L").Append(symbol.Line).Append(' ')
+                        .Append(symbol.Kind).Append(' ').Append(symbol.Name).Append('\n');
+                }
+            }
+
+            // 建议区间：首屏 + 每个类型附近各一段
+            var ranges = new List<string> { "1-200" };
+            foreach (var symbol in symbols.Where(s => s.Kind == "类型").Take(3))
+            {
+                var start = Math.Max(1, symbol.Line - 10);
+                var end = symbol.Line + 120;
+                if (totalLines > 0)
+                {
+                    end = Math.Min(end, totalLines);
+                }
+
+                var range = start + "-" + end;
+                if (!ranges.Contains(range))
+                {
+                    ranges.Add(range);
+                }
+            }
+
+            builder.Append("\n[建议区间] ");
+            builder.Append(string.Join("、", ranges.Select(range =>
+            {
+                var parts = range.Split('-');
+                return "start_line=" + parts[0] + "&end_line=" + parts[1];
+            })));
+            builder.Append("\n需要具体实现时请带 start_line / end_line 读取。");
+
+            var result = builder.ToString();
+            return result.Length <= 6000 ? result : result.Substring(0, 6000) + "\n…（大纲过长，已截断）";
+        }
+
+        private static string ReadTextPrefix(string full, int maxChars)
+        {
+            using (var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+            {
+                var buffer = new char[Math.Max(1, maxChars)];
+                var read = reader.ReadBlock(buffer, 0, buffer.Length);
+                return new string(buffer, 0, read);
+            }
+        }
+
+        private static int CountLinesCapped(string full, int maxLines)
+        {
+            try
+            {
+                using (var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+                {
+                    var count = 0;
+                    while (count < maxLines && reader.ReadLine() != null)
+                    {
+                        count++;
+                    }
+
+                    return count;
+                }
+            }
+            catch (Exception)
+            {
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// 从磁盘按行读取指定区间（超大文件专用）：不依赖前面的 40000 字符缓存。
+        /// 返回 null 表示起始行已超过文件末尾；<paramref name="totalLines"/> 为读到的总行数（最多 200000）。
+        /// </summary>
+        private static string ReadLineRange(string full, int from, int? to, out int totalLines)
+        {
+            const int MaxOutputChars = 60_000;
+            totalLines = 0;
+
+            var builder = new StringBuilder();
+
+            using (var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+            {
+                string line;
+                var lineNumber = 0;
+
+                while ((line = reader.ReadLine()) != null)
+                {
+                    lineNumber++;
+                    if (totalLines < 200000)
+                    {
+                        totalLines = lineNumber;
+                    }
+
+                    if (lineNumber >= from && (!to.HasValue || lineNumber <= to.Value))
+                    {
+                        builder.Append(lineNumber).Append(": ").Append(line).Append('\n');
+
+                        if (builder.Length >= MaxOutputChars)
+                        {
+                            builder.Append("[已达到单次读取上限 ").Append(MaxOutputChars)
+                                .Append(" 字符；请缩小 start_line / end_line 范围]\n");
+                            break;
+                        }
+                    }
+
+                    if (to.HasValue && lineNumber >= to.Value)
+                    {
+                        break;
+                    }
+                }
+
+                if (lineNumber < from)
+                {
+                    return null;
+                }
+            }
+
+            return builder.ToString();
         }
 
         /// <summary>
@@ -2283,6 +2523,7 @@ namespace LangCode.Workspace
             {
                 _textCache.Clear();
                 _textCacheChars = 0;
+                _rangeCache.Clear();
             }
         }
 

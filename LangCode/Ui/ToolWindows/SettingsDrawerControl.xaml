@@ -1083,6 +1083,152 @@
                                            Margin="0,5,0,0"/>
                             </StackPanel>
 
+                            <!-- 仓库地图：把目录 / 入口文件 / 关键符号注入系统提示 -->
+                            <Grid Margin="0,14,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0"
+                                            Margin="0,0,10,0">
+                                    <TextBlock Text="仓库地图"
+                                               Style="{StaticResource TdToggleName}"/>
+                                    <TextBlock Text="把目录、入口文件与关键符号注入系统提示，减少模型先猜项目结构的探索轮次"
+                                               Style="{StaticResource TdToggleDesc}"/>
+                                </StackPanel>
+                                <ToggleButton Grid.Column="1"
+                                              Style="{StaticResource Switch}"
+                                              Tag="RepoMap"
+                                              IsChecked="True"
+                                              Click="Switch_Click"
+                                              VerticalAlignment="Center"/>
+                            </Grid>
+
+                            <!-- 向量检索增强：BM25 候选 + embedding 重排（可选） -->
+                            <StackPanel Margin="0,16,0,0">
+                                <TextBlock Text="向量检索增强（可选）"
+                                           Style="{StaticResource TdSectionTitle}"
+                                           Margin="0,0,0,9"/>
+                                <TextBlock Text="BM25 召回 + 后台向量索引召回，再用 embedding 重排；首次启用会在后台分批建向量。未配置或调用失败时自动回退 BM25"
+                                           Style="{StaticResource TdFieldHint}"
+                                           Margin="0,0,0,8"
+                                           TextWrapping="Wrap"/>
+
+                                <Grid Margin="0,6,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0"
+                                                Margin="0,0,10,0">
+                                        <TextBlock Text="向量提供商"
+                                                   Style="{StaticResource TdFieldLabel}"/>
+                                        <TextBlock Text="Ollama 本地默认；OpenAI 兼容覆盖 OpenAI / LM Studio / vLLM / TEI"
+                                                   Style="{StaticResource TdFieldHint}"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <ComboBox Grid.Column="1"
+                                              Tag="EmbeddingProvider"
+                                              MinWidth="170"
+                                              SelectedIndex="0"
+                                              SelectionChanged="Option_Changed">
+                                        <ComboBoxItem Content="Off"/>
+                                        <ComboBoxItem Content="Ollama"/>
+                                        <ComboBoxItem Content="OpenAI Compatible"/>
+                                        <ComboBoxItem Content="Local ONNX"/>
+                                    </ComboBox>
+                                </Grid>
+
+                                <StackPanel Margin="0,0,0,10">
+                                    <TextBlock Text="端点（留空使用默认）"
+                                               Style="{StaticResource TdFieldLabel}"
+                                               Margin="0,0,0,5"/>
+                                    <TextBox Style="{StaticResource FieldControl}"
+                                             Tag="EmbeddingEndpoint"
+                                             TextChanged="TextOption_Changed"
+                                             Text=""/>
+                                    <TextBlock Text="Ollama 默认 http://localhost:11434；OpenAI 兼容默认 https://api.openai.com/v1"
+                                               Style="{StaticResource TdFieldHint}"
+                                               Margin="0,5,0,0"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="10"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="向量模型"
+                                                   Style="{StaticResource TdFieldLabel}"
+                                                   Margin="0,0,0,5"/>
+                                        <TextBox Style="{StaticResource FieldControl}"
+                                                 Tag="EmbeddingModel"
+                                                 TextChanged="TextOption_Changed"
+                                                 Text=""/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="重排权重（0-100）"
+                                                   Style="{StaticResource TdFieldLabel}"
+                                                   Margin="0,0,0,5"/>
+                                        <TextBox Style="{StaticResource FieldControl}"
+                                                 Tag="EmbeddingWeightPercent"
+                                                 TextChanged="TextOption_Changed"
+                                                 Text="35"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <StackPanel Margin="0,0,0,10">
+                                    <TextBlock Text="向量端点 API Key（可选）"
+                                               Style="{StaticResource TdFieldLabel}"
+                                               Margin="0,0,0,5"/>
+                                    <PasswordBox Style="{StaticResource PasswordField}"
+                                                 Tag="EmbeddingApiKey"
+                                                 PasswordChanged="PasswordOption_Changed"/>
+                                    <TextBlock Text="OpenAI 兼容端点需要时填写；Ollama 通常留空。保存时按当前 Windows 用户加密落盘"
+                                               Style="{StaticResource TdFieldHint}"
+                                               Margin="0,5,0,0"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+
+                                <StackPanel Margin="0,0,0,10">
+                                    <TextBlock Text="本地 ONNX 模型路径（仅 Local ONNX）"
+                                               Style="{StaticResource TdFieldLabel}"
+                                               Margin="0,0,0,5"/>
+                                    <TextBox Style="{StaticResource FieldControl}"
+                                             Tag="EmbeddingModelPath"
+                                             TextChanged="TextOption_Changed"
+                                             Text=""/>
+                                </StackPanel>
+
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="10"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="ONNX 词表路径"
+                                                   Style="{StaticResource TdFieldLabel}"
+                                                   Margin="0,0,0,5"/>
+                                        <TextBox Style="{StaticResource FieldControl}"
+                                                 Tag="EmbeddingVocabPath"
+                                                 TextChanged="TextOption_Changed"
+                                                 Text=""/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="ONNX 最大 token 数"
+                                                   Style="{StaticResource TdFieldLabel}"
+                                                   Margin="0,0,0,5"/>
+                                        <TextBox Style="{StaticResource FieldControl}"
+                                                 Tag="EmbeddingMaxTokens"
+                                                 TextChanged="TextOption_Changed"
+                                                 Text="256"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+
                             <!-- 结构化编辑：按符号名定位代码块再改写（edit_symbol） -->
                             <Grid Margin="0,14,0,4">
                                 <Grid.ColumnDefinitions>

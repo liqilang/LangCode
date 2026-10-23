@@ -385,18 +385,31 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 - 命令 / 验证 / 诊断输出另有更小的上限；
 - 只读工具重复调用且结果完全相同时，回灌一句「内容未变化，已省略」；
 - 文件内容按「最后写入时间 + 长度」缓存：同一文件在未改动前重复读取 / 搜索不再重复读盘；
+- 读取结果按「文件版本 + 行区间」再缓存一层：反复读同一段不重新切行 / 拼行号；
 - 同一轮里多个只读工具（读文件 / 搜索 / 符号 / 混合检索）会**并行执行**（最多 4 个），写操作与需要审批的动作仍然串行；
 - 回灌历史前会折叠动作块里的超长参数（例如 `write_file` 的整段 content）；
 - 界面渲染仍使用原始文本，不受折叠影响。
 
-### 8.3 总结式上下文压缩
+### 8.3 可选向量重排
+
+默认关闭，设置页「能力 → 向量检索增强」可选：
+
+| 提供商              | 说明                                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| `Ollama`            | 默认端点 `http://localhost:11434`，使用 `/api/embed`（老版本自动退回 `/api/embeddings`）      |
+| `OpenAI Compatible` | OpenAI / LM Studio / vLLM / TEI 等 `/embeddings` 兼容端点                                     |
+| `Local ONNX`        | 反射加载本机 `Microsoft.ML.OnnxRuntime`，需配置 BERT 风格模型与 `vocab.txt`；不可用时自动回退 |
+
+流程：BM25 先召回候选（约 `limit × 4`）→ 查询与候选做 embedding → 余弦相似度与 BM25 归一化分按权重融合 → 取前 N。首次启用时还会在后台分批为最多 600 个片段建立向量，后续查询可做**向量召回**：BM25 没命中但语义相近的片段也能进入结果。任何一步失败都只影响本次重排，结果仍返回 BM25 命中，并在结果头部标注回退原因；连续失败会冷却 2 分钟。
+
+### 8.4 总结式上下文压缩
 
 - 接近上下文窗口阈值（默认 60%，可设置）时触发；
 - 较早的中间段交给模型压成结构化摘要，而不是直接丢弃；
 - 采用「只追加、不改写」策略：最早一批轮次和已生成的摘要块永不改写，保证前后请求的前缀逐字节一致，**提示缓存才能命中**；
 - 也可以手动点「压缩上下文」。
 
-### 8.4 提示缓存
+### 8.5 提示缓存
 
 设置里的 `PromptCaching` 会为稳定前缀标记缓存：
 
@@ -404,17 +417,19 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 - OpenAI 兼容：隐式缓存；
 - 用量统计会记录缓存命中的输入 token，并按折扣价估算费用。
 
-### 8.5 用量、预算与审计
+### 8.6 用量、预算与审计
 
 - `usage.jsonl` 按会话记录每次模型调用的输入 / 输出 / 缓存 token 与费用；
 - 设置费用预算后，每一步开始前检查，达到预算硬停；
 - 开启审计日志后，每次工具调用（名字、参数摘要、结果摘要）追加到 `audit.log`，单条字段截断，文件超过 2MB 轮转。
 
-### 8.6 源码位置
+### 8.7 源码位置
 
 - 主循环里的压缩 / 去重 / 并行只读 / 折叠：[`AgentRunner.cs`](../LangCode/Agent/AgentRunner.cs)
-- 混合检索（正文 / 符号 / 路径 + 中文二元组）：[`SemanticIndex.cs`](../LangCode/Workspace/SemanticIndex.cs)
-- 文件内容缓存与忽略规则：[`FileSystemWorkspace.cs`](../LangCode/Workspace/FileSystemWorkspace.cs)
+- 混合检索 / 持久化 / 增量更新：[`SemanticIndex.cs`](../LangCode/Workspace/SemanticIndex.cs)
+- 向量提供商（Ollama / OpenAI 兼容 / 本地 ONNX）：[`Embeddings.cs`](../LangCode/Workspace/Embeddings.cs)
+- 仓库地图：[`RepoMap.cs`](../LangCode/Workspace/RepoMap.cs)
+- 文件内容 / 行区间缓存、大文件大纲：[`FileSystemWorkspace.cs`](../LangCode/Workspace/FileSystemWorkspace.cs)
 - 工具结果裁剪：[`ToolOutputTrimmer`](../LangCode/Domain/Chat/ToolOutputTrimmer.cs)
 - 用量与预算：[`UsageStore.cs`](../LangCode/Persistence/UsageStore.cs)
 - 审计日志：[`AuditLog.cs`](../LangCode/Persistence/AuditLog.cs)
@@ -570,32 +585,35 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 
 ## 11. 配置速查
 
-| 设置项                 | 作用                                  | 默认   |
-| ---------------------- | ------------------------------------- | ------ |
-| `PlanMode`             | 计划模式（只读）                      | 关     |
-| `AutoContext`          | 自动附带当前文件 / 选中代码 / 诊断    | 开     |
-| `AutoReadProblems`     | 读取「错误列表」诊断                  | 开     |
-| `AutoVerify`           | 改完文件后自动跑验证命令              | 开     |
-| `VerifyCommand`        | 指定验证命令；留空则自动探测          | 空     |
-| `AutoFixProblems`      | 自动回灌编译错误修复                  | 开     |
-| `AutoFixMaxRounds`     | 自动修复轮次上限                      | 2      |
-| `Checkpoints`          | 每轮打检查点                          | 开     |
-| `NativeToolCalling`    | 使用原生 function calling             | 关     |
-| `PromptCaching`        | 提示缓存                              | 开     |
-| `ContextWindow`        | 上下文窗口                            | 131072 |
-| `MaxAgentSteps`        | 单轮最大模型→工具往返次数；0 = 不限制 | 0      |
-| `AutoCompactThreshold` | 自动压缩阈值                          | 60%    |
-| `SemanticIndex`        | 本地语义索引                          | 开     |
-| `StructuredEditing`    | 结构化编辑                            | 开     |
-| `BrowserAutomation`    | 浏览器自动化                          | 开     |
-| `WebSearchProvider`    | 联网搜索提供商                        | Bing   |
-| `WebSearchMaxResults`  | 联网搜索默认条数                      | 5      |
-| `DocSearchResults`     | 文档检索默认片段数                    | 8      |
-| `Multimodal`           | 图片输入                              | 开     |
-| `BudgetUsd`            | 费用预算；0 = 不限制                  | 0      |
-| `AuditLogEnabled`      | 工具调用审计日志                      | 关     |
-| `CommandDenyList`      | 用户命令黑名单                        | 空     |
-| `CommandAllowPrefixes` | 用户命令信任前缀                      | 空     |
+| 设置项                   | 作用                                  | 默认   |
+| ------------------------ | ------------------------------------- | ------ |
+| `PlanMode`               | 计划模式（只读）                      | 关     |
+| `AutoContext`            | 自动附带当前文件 / 选中代码 / 诊断    | 开     |
+| `AutoReadProblems`       | 读取「错误列表」诊断                  | 开     |
+| `AutoVerify`             | 改完文件后自动跑验证命令              | 开     |
+| `VerifyCommand`          | 指定验证命令；留空则自动探测          | 空     |
+| `AutoFixProblems`        | 自动回灌编译错误修复                  | 开     |
+| `AutoFixMaxRounds`       | 自动修复轮次上限                      | 2      |
+| `Checkpoints`            | 每轮打检查点                          | 开     |
+| `NativeToolCalling`      | 使用原生 function calling             | 关     |
+| `PromptCaching`          | 提示缓存                              | 开     |
+| `ContextWindow`          | 上下文窗口                            | 131072 |
+| `MaxAgentSteps`          | 单轮最大模型→工具往返次数；0 = 不限制 | 0      |
+| `AutoCompactThreshold`   | 自动压缩阈值                          | 60%    |
+| `SemanticIndex`          | 本地混合索引                          | 开     |
+| `RepoMap`                | 系统提示注入仓库地图                  | 开     |
+| `EmbeddingProvider`      | 向量重排提供商（Off / Ollama / ...）  | Off    |
+| `EmbeddingWeightPercent` | 向量重排权重（0-100）                 | 35     |
+| `StructuredEditing`      | 结构化编辑                            | 开     |
+| `BrowserAutomation`      | 浏览器自动化                          | 开     |
+| `WebSearchProvider`      | 联网搜索提供商                        | Bing   |
+| `WebSearchMaxResults`    | 联网搜索默认条数                      | 5      |
+| `DocSearchResults`       | 文档检索默认片段数                    | 8      |
+| `Multimodal`             | 图片输入                              | 开     |
+| `BudgetUsd`              | 费用预算；0 = 不限制                  | 0      |
+| `AuditLogEnabled`        | 工具调用审计日志                      | 关     |
+| `CommandDenyList`        | 用户命令黑名单                        | 空     |
+| `CommandAllowPrefixes`   | 用户命令信任前缀                      | 空     |
 
 完整字段与默认值见 [`AppSettings.cs`](../LangCode/Domain/Settings/AppSettings.cs)。
 
@@ -604,8 +622,9 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 ## 12. 已知边界
 
 - 子任务最多一层，不能无限嵌套。
-- 并行子任务只发生在「同一轮出现多个 `new_task`」时；其他工具仍按顺序执行（文件写入由工作区按路径锁保护）。
+- 同一轮里的只读工具会并行（最多 4 个）；写操作、命令与需要审批的动作仍串行。
 - 计划模式、审批、命令策略是三层不同的保护，不能互相替代。
 - 检查点依赖本机可调用的 `git`；不可用时检查点功能优雅失败，其他能力不受影响。
-- 混合检索是本地索引（BM25 + 符号 / 路径字段 + 中文二元组），关闭后 `semantic_search` 等工具不可用；C# 的类型层次 / 查找实现会优先走 Roslyn。
+- 混合检索是本地索引（BM25 + 符号 / 路径字段 + 中文二元组 + 可选向量重排），关闭后 `semantic_search` 等工具不可用；C# 的类型层次 / 查找实现会优先走 Roslyn。
+- 向量重排默认关闭；Ollama / OpenAI 兼容需要端点可访问，本地 ONNX 需要本机已有 OnnxRuntime 与配套模型 / 词表，失败时自动退回 BM25。
 - `run_tests` 的 `filter` 目前只对 `dotnet test` 生效。
