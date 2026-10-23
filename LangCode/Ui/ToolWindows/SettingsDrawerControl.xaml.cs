@@ -817,7 +817,7 @@ namespace LangCode.Ui.ToolWindows
             for (var i = 0; i < combo.Items.Count; i++)
             {
                 var content = (combo.Items[i] as ComboBoxItem)?.Content as string ?? combo.Items[i]?.ToString();
-                if (string.Equals(content, text, StringComparison.Ordinal))
+                if (string.Equals(content, text, StringComparison.OrdinalIgnoreCase))
                 {
                     combo.SelectedIndex = i;
                     return;

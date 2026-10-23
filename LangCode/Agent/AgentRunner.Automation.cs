@@ -40,6 +40,13 @@ namespace LangCode.Agent
                 var autoDetected = string.IsNullOrWhiteSpace(_settings.VerifyCommand);
                 var label = autoDetected ? verifyCommand + "（自动探测）" : verifyCommand;
 
+                var policyBlocked = _permission.CommandBlockReason(verifyCommand);
+                if (policyBlocked != null)
+                {
+                    callbacks.OnNotice?.Invoke("自动验证被工作区策略拒绝：" + policyBlocked);
+                    return null;
+                }
+
                 callbacks.OnNotice?.Invoke("自动验证：" + label);
                 var result = await _commands.RunAsync(verifyCommand, string.Empty, callbacks.OnCommandOutput, cancellationToken).ConfigureAwait(false);
 

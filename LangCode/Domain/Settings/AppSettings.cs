@@ -579,6 +579,24 @@ namespace LangCode.Domain.Settings
         [DataMember(Name = "repoMap", Order = 138)]
         public bool RepoMap { get; set; } = true;
 
+        /// <summary>
+        /// 审批模式：strict / balanced / trusted（工作区 .langcode/policy.json 优先）
+        /// </summary>
+        [DataMember(Name = "approvalMode", Order = 139)]
+        public string ApprovalMode { get; set; } = "balanced";
+
+        /// <summary>
+        /// 命令解释器：cmd / powershell / bash
+        /// </summary>
+        [DataMember(Name = "commandShell", Order = 140)]
+        public string CommandShell { get; set; } = "cmd";
+
+        /// <summary>
+        /// browser_action 的 evaluate / eval（任意 JS 执行）是否自动批准
+        /// </summary>
+        [DataMember(Name = "autoApproveBrowserScript", Order = 141)]
+        public bool AutoApproveBrowserScript { get; set; }
+
         // ==================== 结构化编辑 ====================
         /// <summary>
         /// 是否启用结构化编辑（<c>edit_symbol</c>）：按符号名 / 括号锚点定位代码块再改写，
@@ -1100,6 +1118,12 @@ namespace LangCode.Domain.Settings
                 EmbeddingMaxTokens = 512;
             }
 
+            // 审批模式 / 命令 Shell：只接受受支持的取值
+            var mode = (ApprovalMode ?? string.Empty).Trim().ToLowerInvariant();
+            ApprovalMode = mode == "strict" || mode == "trusted" ? mode : "balanced";
+            var shell = (CommandShell ?? string.Empty).Trim().ToLowerInvariant();
+            CommandShell = shell == "powershell" || shell == "bash" ? shell : "cmd";
+
             // 预算：负值没有意义，统一当成「不设预算」
             if (BudgetUsd < 0)
             {
@@ -1202,6 +1226,9 @@ namespace LangCode.Domain.Settings
             EmbeddingVocabPath = source.EmbeddingVocabPath;
             EmbeddingMaxTokens = source.EmbeddingMaxTokens;
             RepoMap = source.RepoMap;
+            ApprovalMode = source.ApprovalMode;
+            CommandShell = source.CommandShell;
+            AutoApproveBrowserScript = source.AutoApproveBrowserScript;
             StructuredEditing = source.StructuredEditing;
 
             DocSearchResults = source.DocSearchResults;
@@ -1302,6 +1329,9 @@ namespace LangCode.Domain.Settings
                 EmbeddingVocabPath = EmbeddingVocabPath,
                 EmbeddingMaxTokens = EmbeddingMaxTokens,
                 RepoMap = RepoMap,
+                ApprovalMode = ApprovalMode,
+                CommandShell = CommandShell,
+                AutoApproveBrowserScript = AutoApproveBrowserScript,
                 StructuredEditing = StructuredEditing,
                 DocSearchResults = DocSearchResults,
                 WebSearchProvider = WebSearchProvider,

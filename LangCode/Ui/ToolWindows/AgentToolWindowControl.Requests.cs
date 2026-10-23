@@ -124,7 +124,7 @@ namespace LangCode.Ui.ToolWindows
         /// <summary>
         /// 拍板：把结论交给正在等待的 Agent 循环，并在那张卡片上写下结论文案
         /// </summary>
-        private void DecideApproval(bool approved)
+        private void DecideApproval(bool approved, string statusText = null)
         {
             var pending = _pendingApproval;
             var card = _pendingCard;
@@ -136,7 +136,7 @@ namespace LangCode.Ui.ToolWindows
             {
                 card.IsAccepted = approved;
                 card.IsRejected = !approved;
-                card.StatusText = approved ? "已应用" : "已拒绝";
+                card.StatusText = statusText ?? (approved ? "已应用" : "已拒绝");
                 card.IsPendingApproval = false;
             }
 
@@ -398,6 +398,28 @@ namespace LangCode.Ui.ToolWindows
         private void ApprovalApprove_Click(object sender, RoutedEventArgs e)
         {
             DecideApproval(true);
+        }
+
+        /// <summary>
+        /// 统一审批区：批准，并把「此工具 / 此命令」加入本次会话的临时授权
+        /// </summary>
+        private void ApprovalAlways_Click(object sender, RoutedEventArgs e)
+        {
+            var card = _pendingCard;
+            if (card != null)
+            {
+                if (!string.IsNullOrWhiteSpace(card.ApprovalCommand))
+                {
+                    // 命令只放行这一条，不扩大到整个 run_command
+                    _sessionGrants.GrantCommand(card.ApprovalCommand);
+                }
+                else if (!string.IsNullOrWhiteSpace(card.ApprovalTool))
+                {
+                    _sessionGrants.GrantTool(card.ApprovalTool);
+                }
+            }
+
+            DecideApproval(true, "已应用（本次会话已允许）");
         }
 
         /// <summary>
@@ -767,6 +789,7 @@ namespace LangCode.Ui.ToolWindows
                     Title = EditCardTitle(edit),
                     Path = edit.RelativePath,
                     Lines = edit.Diff,
+                    ApprovalTool = edit.ToolName,
 
                     // 移动没有行级 diff：用一段文字说明源 / 目标，审批区才不会空着
                     Text = edit.IsMove ? "移动 " + edit.RelativePath + " → " + edit.MoveToPath : null,

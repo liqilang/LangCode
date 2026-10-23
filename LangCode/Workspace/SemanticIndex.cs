@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using LangCode.Domain.Settings;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -1061,6 +1062,7 @@ namespace LangCode.Workspace
         {
             var chunks = new List<CodeChunk>();
             var symbols = new List<SymbolNode>();
+            var workspacePolicy = WorkspacePolicy.Load(_roots.Count > 0 ? _roots[0] : null);
 
             // 先尝试磁盘缓存：只对「mtime / size 变了」的文件重新读取与分块，
             // 未变化的文件直接复用上次的片段与符号（大仓库冷启动的主要收益）
@@ -1077,7 +1079,7 @@ namespace LangCode.Workspace
             var fileEntries = new List<CachedFileIndex>();
             var changed = cachedFiles == null || cachedFiles.Count == 0;
 
-            foreach (var file in EnumerateSourceFiles())
+            foreach (var file in EnumerateSourceFiles(workspacePolicy))
             {
                 FileInfo info;
                 try
@@ -1563,7 +1565,7 @@ namespace LangCode.Workspace
             public List<SymbolNode> Symbols = new List<SymbolNode>();
         }
 
-        private IEnumerable<SourceFile> EnumerateSourceFiles()
+        private IEnumerable<SourceFile> EnumerateSourceFiles(WorkspacePolicy workspacePolicy)
         {
             var count = 0;
 
@@ -1622,6 +1624,14 @@ namespace LangCode.Workspace
                             continue;
                         }
 
+                        var relative = RelativeTo(file, root);
+
+                        // 敏感文件 / 工作区禁读路径不进语义索引
+                        if (SensitiveFiles.IsSensitive(relative) || workspacePolicy.IsPathDenied(relative))
+                        {
+                            continue;
+                        }
+
                         if (++count > MaxFiles)
                         {
                             yield break;
@@ -1631,7 +1641,7 @@ namespace LangCode.Workspace
                         {
                             RootIndex = rootIndex,
                             FullPath = file,
-                            RelativePath = RelativeTo(file, root),
+                            RelativePath = relative,
                         };
                     }
                 }

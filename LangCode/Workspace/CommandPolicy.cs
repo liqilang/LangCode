@@ -57,6 +57,12 @@ namespace LangCode.Workspace
             // 磁盘格式化（带盘符参数才算，避免把 --format 之类的选项算进来）
             Add("format C:", @"\bformat(\.com)?\s+[a-z]:");
 
+            // PowerShell 混淆执行：-EncodedCommand / -enc 里的内容无法在确认卡上审查
+            Add("powershell -EncodedCommand", @"\b(?:powershell|pwsh)(?:\.exe)?\b[^\r\n]*\s-(?:enc|encodedcommand)\b");
+
+            // 远程脚本直接管道执行
+            Add("curl/wget 管道执行", @"\b(?:curl|wget)\b[^\r\n|]*\|\s*(?:ba|z|k)?sh\b");
+
             return patterns;
         }
 

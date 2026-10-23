@@ -28,6 +28,11 @@ namespace LangCode.Workspace
         public string Root { get; set; } = string.Empty;
 
         /// <summary>
+        /// 命令解释器：cmd / powershell / bash（默认 cmd）
+        /// </summary>
+        public string Shell { get; set; } = "cmd";
+
+        /// <summary>
         /// 超时（秒）超时后进程会被结束，并把已经产出的输出还给模型
         /// </summary>
         public int TimeoutSeconds { get; set; } = 90;
@@ -124,7 +129,22 @@ namespace LangCode.Workspace
         {
             var directory = ResolveDirectory(workingDirectory);
             var relative = directory.Length > Root.Length ? directory.Substring(Root.Length).TrimStart('\\', '/') : string.Empty;
-            return relative.Length == 0 ? command : "[" + relative + "] " + command;
+            var shell = (Shell ?? string.Empty).Trim().ToLowerInvariant();
+            var prefix = shell == "powershell" || shell == "bash" ? "[" + shell + "] " : string.Empty;
+
+            return relative.Length == 0
+                ? prefix + command
+                : "[" + relative + "] " + prefix + command;
+        }
+
+        /// <summary>
+        /// 双引号参数里的转义：PowerShell / bash 都接受 \" 形式
+        /// </summary>
+        private static string EscapeForDoubleQuotes(string command)
+        {
+            // 只转义双引号：PowerShell / bash 里反斜杠不是转义符，
+            // 把 C:\foo 改成 C:\\foo 反而会改变路径语义
+            return (command ?? string.Empty).Replace("\"", "\\\"");
         }
 
         /// <summary>
@@ -147,15 +167,38 @@ namespace LangCode.Workspace
 
         private ToolResult Execute(string command, string directory, Action<string> onOutput, CancellationToken cancellationToken)
         {
-            // chcp 65001：把控制台切到 UTF-8，中文输出才不会变成乱码
-            var wrapped = "chcp 65001>nul & " + command;
-
             var timeout = ResolveTimeout(command);
+            var shell = (Shell ?? string.Empty).Trim().ToLowerInvariant();
+
+            string fileName;
+            string arguments;
+
+            switch (shell)
+            {
+                case "powershell":
+                    // chcp 对 PowerShell 不生效：用 $OutputEncoding 管住输出编码
+                    fileName = "powershell.exe";
+                    arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"" +
+                                "chcp 65001 > $null; $OutputEncoding = [Console]::OutputEncoding = " +
+                                "[System.Text.Encoding]::UTF8; " + EscapeForDoubleQuotes(command) + "\"";
+                    break;
+
+                case "bash":
+                    fileName = "bash.exe";
+                    arguments = "-lc \"" + EscapeForDoubleQuotes(command) + "\"";
+                    break;
+
+                default:
+                    // chcp 65001：把控制台切到 UTF-8，中文输出才不会变成乱码
+                    fileName = "cmd.exe";
+                    arguments = "/d /s /c \"chcp 65001>nul & " + command + "\"";
+                    break;
+            }
 
             var startInfo = new ProcessStartInfo
             {
-                FileName = "cmd.exe",
-                Arguments = "/d /s /c \"" + wrapped + "\"",
+                FileName = fileName,
+                Arguments = arguments,
                 WorkingDirectory = directory,
                 UseShellExecute = false,
                 CreateNoWindow = true,

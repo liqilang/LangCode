@@ -430,6 +430,8 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 - 向量提供商（Ollama / OpenAI 兼容 / 本地 ONNX）：[`Embeddings.cs`](../LangCode/Workspace/Embeddings.cs)
 - 仓库地图：[`RepoMap.cs`](../LangCode/Workspace/RepoMap.cs)
 - 文件内容 / 行区间缓存、大文件大纲：[`FileSystemWorkspace.cs`](../LangCode/Workspace/FileSystemWorkspace.cs)
+- 权限策略 / 会话授权 / 工作区策略：[`PermissionPolicy.cs`](../LangCode/Agent/PermissionPolicy.cs)、[`SessionGrantStore.cs`](../LangCode/Agent/SessionGrantStore.cs)、[`WorkspacePolicy.cs`](../LangCode/Domain/Settings/WorkspacePolicy.cs)
+- 敏感文件与网络守卫：[`SecurityGuards.cs`](../LangCode/Workspace/SecurityGuards.cs)
 - 工具结果裁剪：[`ToolOutputTrimmer`](../LangCode/Domain/Chat/ToolOutputTrimmer.cs)
 - 用量与预算：[`UsageStore.cs`](../LangCode/Persistence/UsageStore.cs)
 - 审计日志：[`AuditLog.cs`](../LangCode/Persistence/AuditLog.cs)
@@ -440,42 +442,63 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 
 ### 9.1 按类别自动批准
 
-[`ApprovalCatalog`](../LangCode/Domain/Catalog/ApprovalCatalog.cs) 把操作分为六类：
+[`ApprovalCatalog`](../LangCode/Domain/Catalog/ApprovalCatalog.cs) 把操作分为七类：
 
-| 类别         | 默认     | 覆盖的操作                                           |
-| ------------ | -------- | ---------------------------------------------------- |
-| 读取文件     | 自动批准 | 读文件 / 列目录 / 搜索 / 混合检索 / 符号查询         |
-| 编辑已有文件 | 需要确认 | 局部替换 / 结构化编辑 / 覆盖已有文件 / 补丁 / 重命名 |
-| 新增文件     | 需要确认 | 新建文件                                             |
-| 执行终端命令 | 需要确认 | `run_command` / `run_tests` / 调试器控制             |
-| 浏览器操作   | 需要确认 | `open_url` / `browser_action`                        |
-| MCP 工具     | 需要确认 | `mcp_call`                                           |
+| 类别           | 默认     | 覆盖的操作                                           |
+| -------------- | -------- | ---------------------------------------------------- |
+| 读取文件       | 自动批准 | 读文件 / 列目录 / 搜索 / 混合检索 / 符号查询         |
+| 编辑已有文件   | 需要确认 | 局部替换 / 结构化编辑 / 覆盖已有文件 / 补丁 / 重命名 |
+| 新增文件       | 需要确认 | 新建文件                                             |
+| 执行终端命令   | 需要确认 | `run_command` / `run_tests` / 调试器控制             |
+| 浏览器操作     | 需要确认 | `open_url` / `browser_action`                        |
+| 浏览器脚本执行 | 需要确认 | `browser_action` 的 `evaluate` / `eval`（任意 JS）   |
+| MCP 工具       | 需要确认 | `mcp_call`                                           |
 
 输入框的 **Auto** 芯片可以直接切换这些类别；设置页也有同样的开关。
 
-### 9.2 写文件的审批流程
+### 9.2 工作区策略与会话授权
+
+完整 schema 见 [`policy.md`](policy.md)。三层优先级：
+
+1. **工作区硬拒绝**：`.langcode/policy.json` 的 `deniedTools` / `deniedPaths` / `deniedCommandPrefixes`、网络守卫、`allowBrowserEvaluate=false`；
+2. **会话临时授权**：审批卡上的「本次会话内始终允许此工具」；命令只放行那一条完整命令，新建 / 切换会话即清空；
+3. **审批模式**：`strict` 全部确认、`balanced` 按类别开关、`trusted` 默认放行；敏感文件与硬拒绝不受模式影响。
+
+敏感文件（`.env`、`*.pem`、`*.key`、`id_rsa`、`appsettings.*.json` 等）不会进入 `search_text` / 语义索引；读取与写入逐次确认，且**不接受**「本次会话始终允许」。
+
+### 9.3 写文件的审批流程
 
 1. 工具先「准备」改动（算出 diff），此时磁盘还没变；
 2. 若该类别未自动批准，界面出现差异卡与统一审批区；
 3. 用户点「允许」才真正落盘；点「拒绝」则文件不变，模型收到拒绝原因；
 4. 自动批准时也会补一张「已应用」的编辑卡，保证对话里能看到「AI 动过哪个文件」。
 
-### 9.3 未保存文件保护
+### 9.4 未保存文件保护
 
 如果目标文件在 Visual Studio 编辑器里还有未保存改动，直接写盘会被拒绝，并提示先按 `Ctrl+S`。这样不会覆盖用户正在编辑的缓冲区。
 
-### 9.4 命令安全策略
+### 9.5 命令安全策略
 
 [`CommandPolicy`](../LangCode/Workspace/CommandPolicy.cs) 会检查：
 
 - 用户自定义黑名单（命中即拒绝，优先级最高）；
 - 用户信任前缀（命中则跳过内置危险检查，黑名单仍生效）；
 - 高风险命令名（`format`、`diskpart`、`shutdown`、`bcdedit` 等）；
-- 危险参数组合（`rm -rf /`、`del /f /s /q c:\`、`reg delete hklm`、`dd` 写块设备、fork 炸弹等）。
+- 危险参数组合（`rm -rf /`、`del /f /s /q c:\`、`reg delete hklm`、`dd` 写块设备、fork 炸弹等）；
+- PowerShell 混淆执行（`powershell -EncodedCommand` / `-enc`）与 `curl | sh` 这类远程脚本管道。
 
-危险命令即使开了自动批准也不会执行。
+命令解释器可在设置页或工作区策略里选择 `cmd` / `PowerShell` / `bash`。危险命令即使开了自动批准也不会执行。
 
-### 9.5 检查点与撤销
+### 9.6 SSRF 与私网守卫
+
+[`NetworkGuard`](../LangCode/Workspace/SecurityGuards.cs) 会拦截 `open_url` / `browser_action(navigate)` 的目标：
+
+- 永远拦截云元数据 / 链路本地地址（如 `169.254.169.254`）；
+- 私网段（`10/8`、`172.16/12`、`192.168/16`、IPv6 ULA）默认拦截，可用策略 `blockPrivateNetwork=false` 放行；
+- `localhost` 默认放行（前端自测需要），可用 `allowLocalhost=false` 关闭；
+- 相对路径打开工作区文件时，敏感文件仍需策略放行。
+
+### 9.7 检查点与撤销
 
 **检查点：**
 
@@ -490,7 +513,7 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 - 「撤销本轮」：回滚本轮所有落盘改动，新建文件删除；
 - 这两者走内存中的改动记录，不依赖 git；检查点则用于跨轮次 / 重开 VS 后的还原。
 
-### 9.6 工作区边界
+### 9.8 工作区边界
 
 文件类工具都限制在工作区根目录内，路径统一使用相对路径与 `/` 分隔；写入工作区之外的路径会被拒绝。
 
@@ -585,35 +608,38 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 
 ## 11. 配置速查
 
-| 设置项                   | 作用                                  | 默认   |
-| ------------------------ | ------------------------------------- | ------ |
-| `PlanMode`               | 计划模式（只读）                      | 关     |
-| `AutoContext`            | 自动附带当前文件 / 选中代码 / 诊断    | 开     |
-| `AutoReadProblems`       | 读取「错误列表」诊断                  | 开     |
-| `AutoVerify`             | 改完文件后自动跑验证命令              | 开     |
-| `VerifyCommand`          | 指定验证命令；留空则自动探测          | 空     |
-| `AutoFixProblems`        | 自动回灌编译错误修复                  | 开     |
-| `AutoFixMaxRounds`       | 自动修复轮次上限                      | 2      |
-| `Checkpoints`            | 每轮打检查点                          | 开     |
-| `NativeToolCalling`      | 使用原生 function calling             | 关     |
-| `PromptCaching`          | 提示缓存                              | 开     |
-| `ContextWindow`          | 上下文窗口                            | 131072 |
-| `MaxAgentSteps`          | 单轮最大模型→工具往返次数；0 = 不限制 | 0      |
-| `AutoCompactThreshold`   | 自动压缩阈值                          | 60%    |
-| `SemanticIndex`          | 本地混合索引                          | 开     |
-| `RepoMap`                | 系统提示注入仓库地图                  | 开     |
-| `EmbeddingProvider`      | 向量重排提供商（Off / Ollama / ...）  | Off    |
-| `EmbeddingWeightPercent` | 向量重排权重（0-100）                 | 35     |
-| `StructuredEditing`      | 结构化编辑                            | 开     |
-| `BrowserAutomation`      | 浏览器自动化                          | 开     |
-| `WebSearchProvider`      | 联网搜索提供商                        | Bing   |
-| `WebSearchMaxResults`    | 联网搜索默认条数                      | 5      |
-| `DocSearchResults`       | 文档检索默认片段数                    | 8      |
-| `Multimodal`             | 图片输入                              | 开     |
-| `BudgetUsd`              | 费用预算；0 = 不限制                  | 0      |
-| `AuditLogEnabled`        | 工具调用审计日志                      | 关     |
-| `CommandDenyList`        | 用户命令黑名单                        | 空     |
-| `CommandAllowPrefixes`   | 用户命令信任前缀                      | 空     |
+| 设置项                     | 作用                                  | 默认     |
+| -------------------------- | ------------------------------------- | -------- |
+| `PlanMode`                 | 计划模式（只读）                      | 关       |
+| `AutoContext`              | 自动附带当前文件 / 选中代码 / 诊断    | 开       |
+| `AutoReadProblems`         | 读取「错误列表」诊断                  | 开       |
+| `AutoVerify`               | 改完文件后自动跑验证命令              | 开       |
+| `VerifyCommand`            | 指定验证命令；留空则自动探测          | 空       |
+| `AutoFixProblems`          | 自动回灌编译错误修复                  | 开       |
+| `AutoFixMaxRounds`         | 自动修复轮次上限                      | 2        |
+| `Checkpoints`              | 每轮打检查点                          | 开       |
+| `NativeToolCalling`        | 使用原生 function calling             | 关       |
+| `PromptCaching`            | 提示缓存                              | 开       |
+| `ContextWindow`            | 上下文窗口                            | 131072   |
+| `MaxAgentSteps`            | 单轮最大模型→工具往返次数；0 = 不限制 | 0        |
+| `AutoCompactThreshold`     | 自动压缩阈值                          | 60%      |
+| `SemanticIndex`            | 本地混合索引                          | 开       |
+| `RepoMap`                  | 系统提示注入仓库地图                  | 开       |
+| `ApprovalMode`             | strict / balanced / trusted           | balanced |
+| `CommandShell`             | cmd / powershell / bash               | cmd      |
+| `AutoApproveBrowserScript` | browser_action evaluate 自动批准      | 关       |
+| `EmbeddingProvider`        | 向量重排提供商（Off / Ollama / ...）  | Off      |
+| `EmbeddingWeightPercent`   | 向量重排权重（0-100）                 | 35       |
+| `StructuredEditing`        | 结构化编辑                            | 开       |
+| `BrowserAutomation`        | 浏览器自动化                          | 开       |
+| `WebSearchProvider`        | 联网搜索提供商                        | Bing     |
+| `WebSearchMaxResults`      | 联网搜索默认条数                      | 5        |
+| `DocSearchResults`         | 文档检索默认片段数                    | 8        |
+| `Multimodal`               | 图片输入                              | 开       |
+| `BudgetUsd`                | 费用预算；0 = 不限制                  | 0        |
+| `AuditLogEnabled`          | 工具调用审计日志                      | 关       |
+| `CommandDenyList`          | 用户命令黑名单                        | 空       |
+| `CommandAllowPrefixes`     | 用户命令信任前缀                      | 空       |
 
 完整字段与默认值见 [`AppSettings.cs`](../LangCode/Domain/Settings/AppSettings.cs)。
 

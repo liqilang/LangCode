@@ -836,6 +836,42 @@
                             <!-- 行由 ApprovalCatalog 在代码里生成（与输入框的 Auto 弹层共用同一份定义） -->
                             <StackPanel x:Name="ApprovalList"/>
                         </StackPanel>
+
+                        <StackPanel Margin="0,0,0,22">
+                            <TextBlock Text="审批模式"
+                                       Style="{StaticResource TdSectionTitle}"
+                                       Margin="0,0,0,9"/>
+                            <ComboBox Tag="ApprovalMode"
+                                      MinWidth="220"
+                                      SelectedIndex="1"
+                                      SelectionChanged="Option_Changed">
+                                <ComboBoxItem Content="strict"/>
+                                <ComboBoxItem Content="balanced"/>
+                                <ComboBoxItem Content="trusted"/>
+                            </ComboBox>
+                            <TextBlock Text="strict = 所有动作都确认；balanced = 按上面的类别开关；trusted = 默认放行（敏感文件 / 策略拒绝仍然生效）。工作区 .langcode/policy.json 里的 mode 优先"
+                                       Style="{StaticResource TdFieldHint}"
+                                       Margin="0,6,0,0"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <StackPanel Margin="0,0,0,10">
+                            <TextBlock Text="命令解释器"
+                                       Style="{StaticResource TdSectionTitle}"
+                                       Margin="0,0,0,9"/>
+                            <ComboBox Tag="CommandShell"
+                                      MinWidth="220"
+                                      SelectedIndex="0"
+                                      SelectionChanged="Option_Changed">
+                                <ComboBoxItem Content="cmd"/>
+                                <ComboBoxItem Content="PowerShell"/>
+                                <ComboBoxItem Content="bash"/>
+                            </ComboBox>
+                            <TextBlock Text="run_command 用哪个 shell 执行；PowerShell 会关闭配置文件与交互提示，bash 需要系统里能直接调用 bash.exe。工作区策略里的 shell 优先"
+                                       Style="{StaticResource TdFieldHint}"
+                                       Margin="0,6,0,0"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
                     </StackPanel>
 
 

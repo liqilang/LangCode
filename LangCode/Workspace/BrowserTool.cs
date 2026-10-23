@@ -35,6 +35,11 @@ namespace LangCode.Workspace
         }
 
         /// <summary>
+        /// 可选的 URL 守卫（返回 null = 允许，否则是拒绝原因）。用于 SSRF 防护。
+        /// </summary>
+        public Func<string, string> UrlGuard { get; set; }
+
+        /// <summary>
         /// 工作区根目录（用于把相对路径转成本地文件链接）
         /// </summary>
         public string Root { get; }
@@ -102,6 +107,12 @@ namespace LangCode.Workspace
                 };
             }
 
+            var blocked = UrlGuard?.Invoke(target);
+            if (!string.IsNullOrWhiteSpace(blocked))
+            {
+                return new ToolResult { Ok = false, Output = "✗ 安全策略拒绝：" + blocked };
+            }
+
             var report = new StringBuilder();
 
             // ① 交给系统默认浏览器（打不开也只记一笔，不影响后面的抓取）
@@ -122,7 +133,7 @@ namespace LangCode.Workspace
             // ② 抓正文给模型
             try
             {
-                using (var response = await Client.GetAsync(target, cancellationToken).ConfigureAwait(false))
+                using (var response = await GetWithRedirectsAsync(target, cancellationToken).ConfigureAwait(false))
                 {
                     if (!response.IsSuccessStatusCode)
                     {
@@ -156,9 +167,14 @@ namespace LangCode.Workspace
                 return null;
             }
 
+            if (!string.IsNullOrWhiteSpace(UrlGuard?.Invoke(target)))
+            {
+                return null;
+            }
+
             try
             {
-                using (var response = await Client.GetAsync(target, cancellationToken).ConfigureAwait(false))
+                using (var response = await GetWithRedirectsAsync(target, cancellationToken).ConfigureAwait(false))
                 {
                     if (!response.IsSuccessStatusCode)
                     {
@@ -258,9 +274,43 @@ namespace LangCode.Workspace
                 .Replace(amp + "amp;", amp);   // 放最后：避免二次解码
         }
 
+        /// <summary>
+        /// 手动跟随重定向：每一跳都过 URL 守卫，避免 302 到私网 / 元数据地址绕过 SSRF 检查
+        /// </summary>
+        private async Task<HttpResponseMessage> GetWithRedirectsAsync(string url, CancellationToken cancellationToken)
+        {
+            const int MaxRedirects = 5;
+            var current = url;
+
+            for (var i = 0; i <= MaxRedirects; i++)
+            {
+                var response = await Client.GetAsync(current, cancellationToken).ConfigureAwait(false);
+                var status = (int)response.StatusCode;
+                if (status < 300 || status >= 400 || response.Headers.Location == null)
+                {
+                    return response;
+                }
+
+                var next = new Uri(new Uri(current), response.Headers.Location).AbsoluteUri;
+                var blocked = UrlGuard?.Invoke(next);
+                if (!string.IsNullOrWhiteSpace(blocked))
+                {
+                    response.Dispose();
+                    throw new InvalidOperationException("重定向目标被安全策略拒绝：" + blocked);
+                }
+
+                response.Dispose();
+                current = next;
+            }
+
+            throw new InvalidOperationException("重定向次数过多（最多 " + MaxRedirects + " 次）");
+        }
+
         private static HttpClient CreateClient()
         {
-            var client = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+            // 关闭自动重定向：重定向目标必须逐跳检查，否则 302 到内网就绕过了守卫
+            var handler = new HttpClientHandler { AllowAutoRedirect = false };
+            var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
             client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (compatible; LangCode/1.0)");
             return client;
         }

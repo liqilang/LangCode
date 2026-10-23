@@ -26,10 +26,46 @@ namespace LangCode.Agent
         /// </summary>
         private async Task<ToolResult> ExecuteExternalAsync(ToolAction action, bool auto, AgentCallbacks callbacks, CancellationToken cancellationToken)
         {
+            // 工作区策略 / 命令前缀 / SSRF 守卫：命中即拒绝，连审批都不弹
+            var blocked = _permission.BlockReason(action);
+            if (blocked != null)
+            {
+                return new ToolResult
+                {
+                    Ok = false,
+                    Output = "✗ 安全策略拒绝：" + blocked,
+                };
+            }
+
+            // browser_action 省略 url 时会用自动探测到的本地开发地址：也要过一遍 SSRF 守卫
+            if (string.Equals(action.Name, "browser_action", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(action.Get("action"), "navigate", StringComparison.OrdinalIgnoreCase) &&
+                string.IsNullOrWhiteSpace(action.Get("url")))
+            {
+                var fallback = _browserAutomation.DefaultUrl;
+                var fallbackBlocked = NetworkGuard.Check(
+                    fallback,
+                    !_permission.Workspace.BlockPrivateNetwork,
+                    _permission.Workspace.AllowLocalhost);
+                if (fallbackBlocked != null)
+                {
+                    return new ToolResult { Ok = false, Output = "✗ 安全策略拒绝：" + fallbackBlocked };
+                }
+            }
+
             var preview = BuildPreview(action);
 
-            if (!auto && callbacks.ApproveActionAsync != null)
+            if (!auto)
             {
+                if (callbacks.ApproveActionAsync == null)
+                {
+                    return new ToolResult
+                    {
+                        Ok = false,
+                        Output = "这次操作需要用户确认，但当前没有审批回调（已拒绝）：" + action.Name,
+                    };
+                }
+
                 var approved = await callbacks.ApproveActionAsync(action, new ToolResult { Ok = true, Output = preview }).ConfigureAwait(false);
 
                 if (!approved)
@@ -70,6 +106,13 @@ namespace LangCode.Agent
                         }
 
                         testCommand = ApplyTestFilter(testCommand, action.Get("filter"));
+
+                        var testBlocked = _permission.CommandBlockReason(testCommand);
+                        if (testBlocked != null)
+                        {
+                            return new ToolResult { Ok = false, Output = "✗ 安全策略拒绝：" + testBlocked };
+                        }
+
                         return await RunTestsWithReportAsync(testCommand, callbacks, cancellationToken).ConfigureAwait(false);
                     }
 

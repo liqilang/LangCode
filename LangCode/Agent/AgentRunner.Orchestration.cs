@@ -103,11 +103,25 @@ namespace LangCode.Agent
                 }
 
                 var pending = prepared.Pending;
+                pending.ToolName = "apply_patch";
 
-                // 与单个写工具同一套判定：覆盖算「编辑」、新建算「新增」
-                var auto = ApprovalCatalog.IsAutoApproved(_settings, pending.IsNewFile ? ApprovalCatalog.Create : ApprovalCatalog.Edit);
+                var pathBlocked = _permission.DeniedPathReason(pending.RelativePath);
+                if (pathBlocked != null)
+                {
+                    summary.Append("✗ ").Append(section.Path).Append("：").Append(pathBlocked).Append('\n');
+                    continue;
+                }
 
-                var approved = auto || callbacks.ApproveAsync == null || await callbacks.ApproveAsync(pending).ConfigureAwait(false);
+                // 与单个写工具同一套判定：策略 / 模式 / 会话授权 / 敏感文件
+                var auto = _permission.IsAutoApprovedEdit(pending);
+
+                if (!auto && callbacks.ApproveAsync == null)
+                {
+                    summary.Append("✗ ").Append(section.Path).Append("：需要用户确认，但当前没有审批回调\n");
+                    continue;
+                }
+
+                var approved = auto || await callbacks.ApproveAsync(pending).ConfigureAwait(false);
 
                 if (!approved)
                 {
@@ -295,7 +309,7 @@ namespace LangCode.Agent
                 },
             };
 
-            var subRunner = new AgentRunner(_backend, _workspace, _settings)
+            var subRunner = new AgentRunner(_backend, _workspace, _settings, null, _permission.Grants)
             {
                 MaxSteps = MaxSteps,
                 SubTaskDepth = SubTaskDepth + 1,
@@ -342,13 +356,29 @@ namespace LangCode.Agent
 
             var summary = new StringBuilder();
             var applied = 0;
-            var auto = ApprovalCatalog.IsAutoApproved(_settings, ApprovalCatalog.Edit);
 
             foreach (var pending in pendings)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var approved = auto || callbacks.ApproveAsync == null || await callbacks.ApproveAsync(pending).ConfigureAwait(false);
+                pending.ToolName = "rename_symbol";
+
+                var pathBlocked = _permission.DeniedPathReason(pending.RelativePath);
+                if (pathBlocked != null)
+                {
+                    summary.Append("✗ ").Append(pending.RelativePath).Append("：").Append(pathBlocked).Append('\n');
+                    continue;
+                }
+
+                var auto = _permission.IsAutoApprovedEdit(pending);
+
+                if (!auto && callbacks.ApproveAsync == null)
+                {
+                    summary.Append("✗ ").Append(pending.RelativePath).Append("：需要用户确认，但当前没有审批回调\n");
+                    continue;
+                }
+
+                var approved = auto || await callbacks.ApproveAsync(pending).ConfigureAwait(false);
 
                 if (!approved)
                 {

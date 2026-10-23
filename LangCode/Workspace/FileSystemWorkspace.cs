@@ -59,6 +59,12 @@ namespace LangCode.Workspace
         /// 是否是一次移动操作
         /// </summary>
         public bool IsMove => !string.IsNullOrWhiteSpace(MoveToPath);
+
+        /// <summary>
+        /// 触发这次改动的工具名（replace_in_file / apply_patch / rename_symbol …），
+        /// 审批界面据此做「本次会话始终允许此工具」的授权
+        /// </summary>
+        public string ToolName { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -241,6 +247,12 @@ namespace LangCode.Workspace
         /// 全部根目录（多根工作区；首个为主根）
         /// </summary>
         public IList<string> Roots => _roots;
+
+        /// <summary>
+        /// 可选的相对路径过滤：返回 true 表示跳过该文件。
+        /// AgentRunner 会把工作区策略的 deniedPaths 接进来，避免搜索 / 符号扫描绕过策略。
+        /// </summary>
+        public Func<string, bool> PathFilter { get; set; }
 
         /// <summary>
         /// 是否尊重 <c>.gitignore</c>默认开启：用户在自己仓库里排除的构建产物 / 生成代码
@@ -477,6 +489,11 @@ namespace LangCode.Workspace
                 if (!File.Exists(full))
                 {
                     return Fail("文件不存在：" + relativePath);
+                }
+
+                if (PathFilter?.Invoke(Relative(full)) == true)
+                {
+                    return Fail("路径被工作区策略禁止访问：" + relativePath);
                 }
 
                 // 区间级缓存：同一文件 + 同一行范围，版本没变就直接复用上次格式化好的结果
@@ -975,6 +992,12 @@ namespace LangCode.Workspace
                 foreach (var file in EnumerateFilesCached(8))
                 {
                     var relative = Relative(file);
+
+                    // 敏感文件（.env / 密钥 / 证书）不参与自动搜索：避免模型在未确认前看到内容
+                    if (SensitiveFiles.IsSensitive(relative))
+                    {
+                        continue;
+                    }
 
                     // 二进制 / 压缩 / 大体积资源直接跳过：读它们既慢又只会产出乱码
                     if (!fileRegex.IsMatch(relative) || IsLikelyBinary(relative))
@@ -2480,7 +2503,7 @@ namespace LangCode.Workspace
                 if (_cachedFiles != null && _cachedDepth >= maxDepth &&
                     DateTime.UtcNow - _cachedAtUtc < CacheTtl)
                 {
-                    return _cachedFiles;
+                    return FilterFiles(_cachedFiles);
                 }
             }
 
@@ -2496,7 +2519,7 @@ namespace LangCode.Workspace
                 if (_cachedFiles != null && _cachedDepth >= maxDepth &&
                     DateTime.UtcNow - _cachedAtUtc < CacheTtl)
                 {
-                    return _cachedFiles;
+                    return FilterFiles(_cachedFiles);
                 }
 
                 _cachedFiles = files;
@@ -2504,7 +2527,38 @@ namespace LangCode.Workspace
                 _cachedAtUtc = DateTime.UtcNow;
             }
 
-            return files;
+            return FilterFiles(files);
+        }
+
+        /// <summary>
+        /// 缓存里保存的是完整文件清单；每次返回时再按当前策略过滤，
+        /// 这样策略在运行中变化也能立即生效（不必等缓存过期）。
+        /// </summary>
+        private IList<string> FilterFiles(IList<string> files)
+        {
+            var filter = PathFilter;
+            if (filter == null || files == null || files.Count == 0)
+            {
+                return files;
+            }
+
+            var result = new List<string>(files.Count);
+            foreach (var file in files)
+            {
+                try
+                {
+                    if (!filter(Relative(file)))
+                    {
+                        result.Add(file);
+                    }
+                }
+                catch (Exception)
+                {
+                    // 单个路径判定失败：保守起见不返回它
+                }
+            }
+
+            return result;
         }
 
         /// <summary>

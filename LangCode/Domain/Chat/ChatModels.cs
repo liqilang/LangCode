@@ -204,6 +204,16 @@ namespace LangCode.Domain.Chat
         public string Path { get; set; } = string.Empty;
 
         /// <summary>
+        /// 待批动作对应的工具名（审批界面「本次会话始终允许」用）
+        /// </summary>
+        public string ApprovalTool { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 待批的完整命令文本（run_command 的会话授权只放行这一条命令）
+        /// </summary>
+        public string ApprovalCommand { get; set; } = string.Empty;
+
+        /// <summary>
         /// 点击路径跳转时用的行号（0 = 不跳）
         /// </summary>
         public int LineHint { get; set; }

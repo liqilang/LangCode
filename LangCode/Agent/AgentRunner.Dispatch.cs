@@ -27,6 +27,17 @@ namespace LangCode.Agent
         /// </summary>
         private async Task<ToolResult> ExecuteActionAsync(ToolAction action, AgentCallbacks callbacks, CancellationToken cancellationToken, bool suppressStreaming)
         {
+            // 工作区策略 / 敏感路径 / 命令前缀 / 网络守卫：命中即拒绝，不进入审批
+            var policyBlock = _permission.BlockReason(action);
+            if (policyBlock != null)
+            {
+                return new ToolResult
+                {
+                    Ok = false,
+                    Output = "✗ 安全策略拒绝：" + policyBlock,
+                };
+            }
+
             // 规划模式：只放行只读工具，改动类直接挡回并说明原因
             // 这样做而不是「提前不问模型」：模型必须知道为什么被拒，才不会反复重试同一个动作
             if (_settings != null && _settings.PlanMode && ToolCatalog.IsDestructive(action.Name))
@@ -39,8 +50,8 @@ namespace LangCode.Agent
                 };
             }
 
-            // 按类别决定要不要问用户（设置页「批准」分页 / 输入框的 Auto 弹层）
-            var auto = ApprovalCatalog.IsAutoApprovedForTool(_settings, action.Name);
+            // 按「工作区策略 → 会话授权 → 审批模式 → 类别开关」统一判定
+            var auto = _permission.IsAutoApproved(action);
 
             if (ToolCatalog.DispatchOf(action.Name) == ToolDispatch.Orchestration)
             {
@@ -61,19 +72,25 @@ namespace LangCode.Agent
             {
                 var pending = result.Pending;
 
-                // 「新建文件」与「覆盖已有文件」是两种风险，不该被同一个开关捎带放行：
-                // write_file 一律按类别 create 归类，于是「放开了新增」就等于「放开了覆盖」
-                // 到这一步才知道文件是否存在（PrepareWrite 已经查过），所以在这里改成按真实情况判定
-                var effectiveAuto = auto;
-                if (action.Name == "write_file")
+                // 供审批界面做「本次会话始终允许此工具」的授权
+                pending.ToolName = action.Name;
+
+                // 逐条改动重新判定：新建 / 覆盖 / 移动目标 / 敏感文件 / 路径策略都可能不同
+                var effectiveAuto = _permission.IsAutoApprovedEdit(pending);
+
+                if (effectiveAuto)
                 {
-                    effectiveAuto = ApprovalCatalog.IsAutoApproved(_settings, pending.IsNewFile ? ApprovalCatalog.Create : ApprovalCatalog.Edit);
+                    return Apply(pending, callbacks);
                 }
 
-                if (effectiveAuto || callbacks.ApproveAsync == null)
+                if (callbacks.ApproveAsync == null)
                 {
-                    // 已放开，或没有审批回调：直接落盘
-                    return Apply(pending, callbacks);
+                    // 需要审批却没有审批通道：拒绝，不能静默落盘
+                    return new ToolResult
+                    {
+                        Ok = false,
+                        Output = "这次改动需要用户确认，但当前没有审批回调（已拒绝）：" + pending.RelativePath,
+                    };
                 }
 
                 var approved = await callbacks.ApproveAsync(pending).ConfigureAwait(false);
@@ -84,8 +101,17 @@ namespace LangCode.Agent
                 };
             }
 
-            if (!auto && callbacks.ApproveActionAsync != null)
+            if (!auto)
             {
+                if (callbacks.ApproveActionAsync == null)
+                {
+                    return new ToolResult
+                    {
+                        Ok = false,
+                        Output = "这次操作需要用户确认，但当前没有审批回调（已拒绝）：" + action.Name,
+                    };
+                }
+
                 // 只读类操作：默认放开；用户在设置里关掉后才逐次确认
                 var allowed = await callbacks.ApproveActionAsync(action, result).ConfigureAwait(false);
                 if (!allowed)

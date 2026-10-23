@@ -60,6 +60,9 @@ namespace LangCode.Domain.Catalog
         public const string Browser = "browser";
         public const string Mcp = "mcp";
 
+        /// <summary>browser_action 的 evaluate / eval：在页面里执行任意 JS，单独一类审批</summary>
+        public const string Script = "browser-script";
+
         /// <summary>
         /// 没有任何类别匹配时的返回值（永远需要用户确认）
         /// </summary>
@@ -72,6 +75,7 @@ namespace LangCode.Domain.Catalog
             new ApprovalCategory(Create, "新增文件", "创建新文件", nameof(AppSettings.AutoApproveCreates), true),
             new ApprovalCategory(Command, "执行终端命令", "在工作区里运行 shell 命令（危险命令会被直接拒绝）", nameof(AppSettings.AutoApproveCommands), true),
             new ApprovalCategory(Browser, "浏览器 / 联网操作", "联网搜索、打开网页 / 抓正文，或用 DevTools 协议做导航、点击、填表、截图", nameof(AppSettings.AutoApproveBrowser), true),
+            new ApprovalCategory(Script, "浏览器脚本执行", "browser_action 的 evaluate / eval：会在页面里执行任意 JS，风险高于普通浏览器操作", nameof(AppSettings.AutoApproveBrowserScript), true),
             new ApprovalCategory(Mcp, "MCP 工具", "调用「设置 → MCP」里已启用的服务器上的工具", nameof(AppSettings.AutoApproveMcp), true),
         ];
 
@@ -88,6 +92,24 @@ namespace LangCode.Domain.Catalog
         public static string CategoryOf(string toolName)
         {
             return ToolCatalog.ApprovalCategoryOf(toolName);
+        }
+
+        /// <summary>
+        /// 按动作（而不是工具名）归类：browser_action 的 evaluate 单独归到 <see cref="Script"/>
+        /// </summary>
+        public static string CategoryOf(ToolAction action)
+        {
+            if (action != null && string.Equals(action.Name, "browser_action", StringComparison.OrdinalIgnoreCase))
+            {
+                var verb = (action.Get("action") ?? string.Empty).Trim();
+                if (string.Equals(verb, "evaluate", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(verb, "eval", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Script;
+                }
+            }
+
+            return CategoryOf(action?.Name);
         }
 
         /// <summary>
@@ -170,6 +192,14 @@ namespace LangCode.Domain.Catalog
         public static bool IsAutoApprovedForTool(AppSettings settings, string toolName)
         {
             return IsAutoApproved(settings, CategoryOf(toolName));
+        }
+
+        /// <summary>
+        /// 按具体动作判定（会识别 browser_action 的 evaluate）
+        /// </summary>
+        public static bool IsAutoApprovedForTool(AppSettings settings, ToolAction action)
+        {
+            return IsAutoApproved(settings, CategoryOf(action));
         }
 
         /// <summary>

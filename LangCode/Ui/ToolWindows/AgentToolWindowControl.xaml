@@ -1242,20 +1242,20 @@
                                                 由思考行与正文各自的模板画出来（多步任务才看得出步骤推进）
                                         -->
                                         <StackPanel>
-                        <ItemsControl ItemsSource="{Binding Blocks}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
+                                                <ItemsControl ItemsSource="{Binding Blocks}">
+                                                        <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                        <Grid>
+                                                                                <Grid.ColumnDefinitions>
+                                                                                        <ColumnDefinition Width="Auto"/>
+                                                                                        <ColumnDefinition Width="*"/>
+                                                                                </Grid.ColumnDefinitions>
 
-                                        <!--
+                                                                                <!--
                                                                                         每一步一个头像（**所有**助手块都有：读文件 / 修改 / 提问 / 完成…），
                                                                                         用户气泡不在此列 —— 它由 UserMessageTemplate 单独渲染，不带头像
                                                                                 -->
-                                        <prim:Icon Grid.Column="0"
+                                                                                <prim:Icon Grid.Column="0"
                                                                                            IconName="robot"
                                                                                            Width="20"
                                                                                            Height="20"
@@ -1263,16 +1263,16 @@
                                                                                            VerticalAlignment="Top"
                                                                                            Margin="0,1,0,0"/>
 
-                                        <StackPanel Grid.Column="1"
+                                                                                <StackPanel Grid.Column="1"
                                                                                             Margin="8,0,0,0">
-                                            <ContentPresenter Content="{Binding}"
+                                                                                        <ContentPresenter Content="{Binding}"
                                                                                                           ContentTemplateSelector="{StaticResource BlockSelector}"/>
+                                                                                </StackPanel>
+                                                                        </Grid>
+                                                                </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
                                         </StackPanel>
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
                                 </Grid>
                         </DataTemplate>
 
@@ -2226,6 +2226,17 @@
                                                                                         </Grid>
                                                                                 </ScrollViewer>
                                                                         </Border>
+
+                                                                        <!-- 会话级授权：只影响当前会话，切换 / 新建会话自动失效 -->
+                                                                        <Button x:Name="ApprovalAlwaysBtn"
+                                                                                Style="{StaticResource ActAccept}"
+                                                                                Height="26"
+                                                                                Margin="11,8,11,0"
+                                                                                HorizontalAlignment="Stretch"
+                                                                                Click="ApprovalAlways_Click">
+                                                                                <TextBlock Text="本次会话内始终允许此工具"
+                                                                                           Style="{StaticResource ActLabel}"/>
+                                                                        </Button>
 
                                                                         <!-- 动作：拒绝 / 批准并继续（各占一半宽） -->
                                                                         <Grid Margin="11,8,11,0">

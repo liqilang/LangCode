@@ -272,6 +272,11 @@ namespace LangCode.Agent
         private readonly AppSettings _settings;
 
         /// <summary>
+        /// 统一权限判定（用户设置 + 工作区策略 + 会话临时授权）
+        /// </summary>
+        private readonly PermissionPolicy _permission;
+
+        /// <summary>
         /// 命令类别的工具实现
         /// </summary>
         private readonly CommandRunner _commands;
@@ -309,11 +314,24 @@ namespace LangCode.Agent
         /// <param name="sharedIndex">
         /// 由界面持有、跨轮次复用的语义索引（已后台预热）。为 null 时按本轮工作区新建。
         /// </param>
-        public AgentRunner(IChatBackend backend, FileSystemWorkspace workspace, AppSettings settings, SemanticIndex sharedIndex = null)
+        /// <param name="sessionGrants">
+        /// 界面持有的「本次会话始终允许」存储；为空时使用一份新的（子任务会继承父任务的实例）。
+        /// </param>
+        public AgentRunner(IChatBackend backend, FileSystemWorkspace workspace, AppSettings settings, SemanticIndex sharedIndex = null, SessionGrantStore sessionGrants = null)
         {
             _backend = backend;
             _workspace = workspace;
             _settings = settings;
+
+            var workspacePolicy = WorkspacePolicy.Load(workspace?.Root);
+            _permission = new PermissionPolicy(settings, workspacePolicy, sessionGrants);
+
+            // 把工作区策略的禁读路径接到文件枚举上：search_text / 符号扫描 / 文档检索
+            // 都不能绕过 deniedPaths（read_file 本身在分派层已拦截）
+            if (_workspace != null)
+            {
+                _workspace.PathFilter = relative => _permission.DeniedPathReason(relative) != null;
+            }
 
             MaxSteps = settings?.MaxAgentSteps ?? 0;
 
@@ -323,8 +341,13 @@ namespace LangCode.Agent
                 // 命令安全策略：内置规则 + 用户自己的黑名单 / 信任前缀
                 DenyList = settings?.CommandDenyList,
                 AllowPrefixes = settings?.CommandAllowPrefixes,
+                Shell = _permission.Shell,
             };
-            _browser = new BrowserTool(root);
+            _browser = new BrowserTool(root)
+            {
+                // 浏览器抓取 / 重定向逐跳都走同一套 SSRF 守卫
+                UrlGuard = _permission.CheckUrl,
+            };
             _browserAutomation = new BrowserAutomation(root)
             {
                 Port = settings?.BrowserRemoteDebuggingPort ?? 9222,
@@ -399,7 +422,18 @@ namespace LangCode.Agent
             // 系统提示词在整轮任务里不变（工具清单 / 项目规则 / 工作区环境都不会中途改变）：
             // 循环外构建一次即可 —— 既省去每步重复拼接，也让提示缓存的前缀保持稳定、更易命中
             var repoMap = _settings != null && _settings.RepoMap ? RepoMap.Build(_workspace?.Roots) : null;
-            var systemPrompt = AgentPrompts.BuildSystemPrompt(_settings, projectRules, _toolchain?.Describe(), repoMap);
+
+            // 把当前审批模式 / 工作区策略摘要告诉模型：它就不会反复尝试被硬拒绝的工具 / 路径
+            var environmentBrief = _toolchain?.Describe();
+            var policyBrief = _permission.Describe();
+            if (!string.IsNullOrWhiteSpace(policyBrief))
+            {
+                environmentBrief = string.IsNullOrWhiteSpace(environmentBrief)
+                    ? policyBrief
+                    : environmentBrief + "；" + policyBrief;
+            }
+
+            var systemPrompt = AgentPrompts.BuildSystemPrompt(_settings, projectRules, environmentBrief, repoMap);
 
             // MaxSteps <= 0 = 不限制：循环由「模型不再要求用工具」或用户取消来结束
             for (var step = 0; MaxSteps <= 0 || step < MaxSteps; step++)
@@ -784,7 +818,7 @@ namespace LangCode.Agent
                 return false;
             }
 
-            return ApprovalCatalog.IsAutoApprovedForTool(_settings, action.Name);
+            return _permission.IsAutoApproved(action);
         }
 
         /// <summary>

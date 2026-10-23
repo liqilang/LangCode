@@ -176,6 +176,11 @@ namespace LangCode.Ui.ToolWindows
         /// </summary>
         private string _workspaceRoot = string.Empty;
 
+        /// <summary>
+        /// 本次会话内的临时授权：新建 / 切换会话时清空
+        /// </summary>
+        private readonly SessionGrantStore _sessionGrants = new SessionGrantStore();
+
         private CancellationTokenSource _cts;
 
         /// <summary>

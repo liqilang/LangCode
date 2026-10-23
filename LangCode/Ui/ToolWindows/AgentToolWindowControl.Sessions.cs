@@ -34,6 +34,9 @@ namespace LangCode.Ui.ToolWindows
             _session.NewConversation();
             _session.ReloadHistory();
 
+            // 新会话 = 新的授权范围：上次的「始终允许」不能延续
+            _sessionGrants.Clear();
+
             // 新会话 = 新的一批改动：差异对比的基线要清掉
             _sessionBaselines.Clear();
 
@@ -412,6 +415,9 @@ namespace LangCode.Ui.ToolWindows
             {
                 return;
             }
+
+            // 换会话：临时授权不跨会话
+            _sessionGrants.Clear();
 
             // 换会话：差异对比的基线要清掉（载入的会话由 git HEAD 兜底）
             _sessionBaselines.Clear();

@@ -168,6 +168,10 @@ namespace LangCode.Ui.ToolWindows
                     Path = ToolPath(action),
                     Text = result?.Output ?? string.Empty,
                     IsPendingApproval = true,
+                    ApprovalTool = action.Name,
+                    ApprovalCommand = string.Equals(action.Name, "run_command", StringComparison.OrdinalIgnoreCase)
+                        ? action.Get("command")
+                        : string.Empty,
                 };
 
                 _askedActions.Add(action);

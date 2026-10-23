@@ -80,14 +80,14 @@
 
 ### 3.5 外部能力
 
-| 工具             | 作用                                                                 | 主要参数                                       | 分派     | 审批类别 | 破坏性 |
-| ---------------- | -------------------------------------------------------------------- | ---------------------------------------------- | -------- | -------- | ------ |
-| `open_url`       | 用系统浏览器打开网页，可选抓取正文                                   | `url`、`fetch`                                 | External | 浏览器   | 是     |
-| `web_search`     | 联网搜索网页，返回标题 / URL / 摘要                                  | `query`、`limit`                               | External | 浏览器   | 是     |
-| `browser_action` | DevTools 自动化：导航 / 读正文 / 点击 / 填表 / 脚本 / 截图 / console | `action`、`url`、`selector`、`value`、`script` | External | 浏览器   | 是     |
-| `mcp_call`       | 调用已启用 MCP 服务器上的工具                                        | `server`、`tool`、`arguments`                  | External | MCP      | 是     |
-| `debug_inspect`  | 只读查看调试器                                                       | `action`、`expression`、`limit`                | External | 读取     | 否     |
-| `debug_control`  | 控制调试器（断点 / 继续 / 单步 / 暂停 / 停止）                       | `action`、`path`、`line`、`condition`          | External | 命令     | 是     |
+| 工具             | 作用                                                                 | 主要参数                                       | 分派     | 审批类别                                        | 破坏性 |
+| ---------------- | -------------------------------------------------------------------- | ---------------------------------------------- | -------- | ----------------------------------------------- | ------ |
+| `open_url`       | 用系统浏览器打开网页，可选抓取正文                                   | `url`、`fetch`                                 | External | 浏览器                                          | 是     |
+| `web_search`     | 联网搜索网页，返回标题 / URL / 摘要                                  | `query`、`limit`                               | External | 浏览器                                          | 是     |
+| `browser_action` | DevTools 自动化：导航 / 读正文 / 点击 / 填表 / 脚本 / 截图 / console | `action`、`url`、`selector`、`value`、`script` | External | 浏览器（`evaluate` 为独立的「浏览器脚本执行」） | 是     |
+| `mcp_call`       | 调用已启用 MCP 服务器上的工具                                        | `server`、`tool`、`arguments`                  | External | MCP                                             | 是     |
+| `debug_inspect`  | 只读查看调试器                                                       | `action`、`expression`、`limit`                | External | 读取                                            | 否     |
+| `debug_control`  | 控制调试器（断点 / 继续 / 单步 / 暂停 / 停止）                       | `action`、`path`、`line`、`condition`          | External | 命令                                            | 是     |
 
 ---
 
@@ -257,6 +257,8 @@
 | `wait`       | 等待（配合选择器或时间）             |
 
 省略 `url` 时，会自动使用工作区探测到的本地开发地址。浏览器自动化受 `BrowserAutomation` 开关控制。
+
+`evaluate` / `eval` 会在页面里执行任意 JS，单独归入「浏览器脚本执行」审批类别；可用工作区策略的 `allowBrowserEvaluate=false` 直接禁止。导航目标会经过 SSRF 守卫（私网 / 元数据默认拦截，localhost 可配置）。
 
 ### 4.10 `mcp_call`
 
