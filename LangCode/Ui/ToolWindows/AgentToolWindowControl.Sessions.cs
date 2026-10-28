@@ -167,9 +167,7 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
-            var show = forceWhenIdle
-                ? !_session.IsBusy && _session.Messages.Count > 0
-                : IsTaskComplete();
+            var show = forceWhenIdle ? !_session.IsBusy && _session.Messages.Count > 0 : IsTaskComplete();
 
             NewTaskBtn.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         }

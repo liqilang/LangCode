@@ -33,9 +33,7 @@ namespace LangCode.Ui.Controls
             title.SetResourceReference(TextBlock.ForegroundProperty, "Ap.FgStrong");
             text.Children.Add(title);
 
-            var description = category.Wired
-                ? category.Description
-                : category.Description;   // 未接入的说明已写在 Description 里
+            var description = category.Wired ? category.Description : category.Description;   // 未接入的说明已写在 Description 里
 
             var descriptionText = new TextBlock
             {

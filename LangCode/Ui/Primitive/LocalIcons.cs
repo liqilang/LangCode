@@ -112,8 +112,7 @@ namespace LangCode.Ui.Primitive
             public double ViewBoxHeight { get; }
         }
 
-        private static readonly Dictionary<string, IconData?> Cache =
-            new Dictionary<string, IconData?>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, IconData?> Cache = new Dictionary<string, IconData?>(StringComparer.OrdinalIgnoreCase);
 
         private static readonly Regex ElementRegex = new Regex(
             "<(?<tag>path|circle|rect|line|polyline|polygon)\\b(?<attrs>[^>]*)>",
@@ -397,9 +396,7 @@ namespace LangCode.Ui.Primitive
                 return null;
             }
 
-            return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
-                ? value
-                : null;
+            return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double value) ? value : null;
         }
     }
 }

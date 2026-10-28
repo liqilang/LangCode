@@ -214,8 +214,7 @@ namespace LangCode.Ui.ToolWindows
                      (assistant != null && assistant.Blocks.Count > 3)))
                 {
                     // 上面几处 await 之后仍要求回到 UI 线程（通知要写状态栏）
-                    await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory
-                        .SwitchToMainThreadAsync();
+                    await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     VsNotifier.Notify(
                         _turnCanRetry ? "LangCode：任务出错，可重试"
                         : _turnInterrupted ? "LangCode：任务已中断"
@@ -277,9 +276,7 @@ namespace LangCode.Ui.ToolWindows
             _turnText = null;
             _turnRawText = null;
 
-            await backend
-                .SendAsync(request, delta => AppendStreaming(assistant, delta), token)
-                .ConfigureAwait(true);
+            await backend.SendAsync(request, delta => AppendStreaming(assistant, delta), token).ConfigureAwait(true);
         }
 
         /// <summary>
@@ -314,41 +311,36 @@ namespace LangCode.Ui.ToolWindows
                 OnDelta = delta => AppendStreaming(assistant, delta),
 
                 // 一轮结束：以**本轮完整输出**定稿（流式累积不作数），并去掉动作块
-                OnTurnComplete = (raw, hasActions) => Dispatcher.BeginInvoke(
-                    new Action(() => FinalizeTurn(assistant, raw, hasActions)),
-                    DispatcherPriority.Background),
+                OnTurnComplete = (raw, hasActions) => Dispatcher.BeginInvoke(new Action(() => FinalizeTurn(assistant, raw, hasActions)), DispatcherPriority.Background),
 
                 OnToolResult = (action, result) => Dispatcher.BeginInvoke(
-                    new Action(() =>
-                    {
-                        Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
-                        AddToolCard(assistant, action, result);
-                    }),
-                    DispatcherPriority.Background),
+                new Action(() =>
+                {
+                    Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+                    AddToolCard(assistant, action, result);
+                }), DispatcherPriority.Background),
 
                 // 达到最大步数：必须给用户一句明确交代，否则看起来就是「说着说着没了」
                 OnStepLimit = steps => Dispatcher.BeginInvoke(
-                    new Action(() =>
+                new Action(() =>
+                {
+                    FinalizeTurn(assistant, null, false);
+                    assistant.Blocks.Add(new ChatBlock
                     {
-                        FinalizeTurn(assistant, null, false);
-                        assistant.Blocks.Add(new ChatBlock
-                        {
-                            Kind = ChatBlockKind.Note,
-                            Text = "已达到本轮最大步数（" + steps + " 步），任务在这里暂停" +
-                                   "输入框上方会出现「继续任务」，点它我就接着做；也可以补充说明后重发",
-                        });
+                        Kind = ChatBlockKind.Note,
+                        Text = "已达到本轮最大步数（" + steps + " 步），任务在这里暂停" + "输入框上方会出现「继续任务」，点它我就接着做；也可以补充说明后重发",
+                    });
 
-                        // 任务没做完 → 请求条上出现「继续任务」（这条标记是它会出现的唯一原因）
-                        _turnCanContinue = true;
+                    // 任务没做完 → 请求条上出现「继续任务」（这条标记是它会出现的唯一原因）
+                    _turnCanContinue = true;
 
-                        UpdateTokens();
-                        RefreshRequestBar();
-                        ScrollToEnd();
+                    UpdateTokens();
+                    RefreshRequestBar();
+                    ScrollToEnd();
 
-                        // 立刻落盘：这个回调经 Dispatcher 异步派发，可能晚于本轮收尾的那次保存
-                        _session.SaveCurrent(_settings);
-                    }),
-                    DispatcherPriority.Background),
+                    // 立刻落盘：这个回调经 Dispatcher 异步派发，可能晚于本轮收尾的那次保存
+                    _session.SaveCurrent(_settings);
+                }), DispatcherPriority.Background),
 
                 ApproveAsync = edit => ApproveEditAsync(assistant, edit),
 
@@ -453,25 +445,20 @@ namespace LangCode.Ui.ToolWindows
                     }
 
                     cancellationToken.ThrowIfCancellationRequested();
-                    return await Dispatcher
-                        .InvokeAsync(() =>
-                        {
-                            Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
-                            return VsDiagnosticsReader.TryRead();
-                        })
-                        .Task
-                        .ConfigureAwait(true);
+                    return await Dispatcher.InvokeAsync(() =>
+                    {
+                        Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+                        return VsDiagnosticsReader.TryRead();
+                    }).Task.ConfigureAwait(true);
                 },
 
                 // 调试器操作（断点 / 单步 / 栈 / 求值）：DTE 只能在 UI 线程访问，
                 // 因此封送到 Dispatcher 执行，再把结果文本回灌给模型
-                DebugControlAsync = (command, cancellationToken) => Dispatcher
-                    .InvokeAsync(() =>
-                    {
-                        Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
-                        return VsDebuggerController.Execute(command, _workspaceRoot);
-                    })
-                    .Task,
+                DebugControlAsync = (command, cancellationToken) => Dispatcher.InvokeAsync(() =>
+                {
+                    Microsoft.VisualStudio.Shell.ThreadHelper.ThrowIfNotOnUIThread();
+                    return VsDebuggerController.Execute(command, _workspaceRoot);
+                }).Task,
 
                 // 未保存的编辑器缓冲区不能被 AI 的磁盘写入覆盖
                 IsFileDirty = relativePath => Dispatcher.Invoke(() =>
@@ -481,9 +468,7 @@ namespace LangCode.Ui.ToolWindows
                 }),
 
                 // 自动验证 / 自动修复过程中的便签（复用当前助手消息）
-                OnNotice = text => Dispatcher.BeginInvoke(
-                    new Action(() => AddNote(text)),
-                    DispatcherPriority.Background),
+                OnNotice = text => Dispatcher.BeginInvoke(new Action(() => AddNote(text)), DispatcherPriority.Background),
             };
 
             await runner.RunAsync(turns, callbacks, token).ConfigureAwait(true);

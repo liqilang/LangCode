@@ -31,9 +31,7 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
-            if (_pendingMentions.Any(m =>
-                    m.IsDirectory == item.IsDirectory &&
-                    string.Equals(m.RelativePath, item.RelativePath, StringComparison.OrdinalIgnoreCase)))
+            if (_pendingMentions.Any(m => m.IsDirectory == item.IsDirectory && string.Equals(m.RelativePath, item.RelativePath, StringComparison.OrdinalIgnoreCase)))
             {
                 return;
             }

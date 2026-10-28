@@ -416,9 +416,7 @@ namespace LangCode.Ui.Controls
         /// </summary>
         private static Color ScrimColor()
         {
-            return ThemeManager.Current == VsThemeKind.Dark
-                ? Color.FromArgb(0x8C, 0x00, 0x00, 0x00)
-                : Color.FromArgb(0x40, 0x10, 0x10, 0x10);
+            return ThemeManager.Current == VsThemeKind.Dark ? Color.FromArgb(0x8C, 0x00, 0x00, 0x00) : Color.FromArgb(0x40, 0x10, 0x10, 0x10);
         }
     }
 }

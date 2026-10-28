@@ -269,8 +269,7 @@ namespace LangCode.Roslyn
 
             foreach (var token in root.DescendantTokens())
             {
-                if (!token.IsKind(SyntaxKind.IdentifierToken) ||
-                    !string.Equals(token.ValueText, name, StringComparison.Ordinal))
+                if (!token.IsKind(SyntaxKind.IdentifierToken) || !string.Equals(token.ValueText, name, StringComparison.Ordinal))
                 {
                     continue;
                 }
@@ -344,12 +343,7 @@ namespace LangCode.Roslyn
         /// 再只改真正绑定到该符号的标识符。找不到唯一声明或编译环境不可用时返回 null。
         /// </summary>
         /// <param name="ambiguous">true 表示同名符号有多个，调用方应直接报错而不是退回文本替换</param>
-        public static IList<SemanticRenameFile> TryRenameAcrossFiles(
-            IList<KeyValuePair<string, string>> files,
-            string oldName,
-            string newName,
-            out string error,
-            out bool ambiguous)
+        public static IList<SemanticRenameFile> TryRenameAcrossFiles(IList<KeyValuePair<string, string>> files, string oldName, string newName, out string error, out bool ambiguous)
         {
             error = null;
             ambiguous = false;
@@ -463,8 +457,7 @@ namespace LangCode.Roslyn
 
                     foreach (var token in root.DescendantTokens())
                     {
-                        if (!token.IsKind(SyntaxKind.IdentifierToken) ||
-                            !string.Equals(token.ValueText, from, StringComparison.Ordinal))
+                        if (!token.IsKind(SyntaxKind.IdentifierToken) || !string.Equals(token.ValueText, from, StringComparison.Ordinal))
                         {
                             continue;
                         }
@@ -557,15 +550,13 @@ namespace LangCode.Roslyn
                 return false;
             }
 
-            return SymbolEqualityComparer.Default.Equals(left, right) ||
-                   SymbolEqualityComparer.Default.Equals(left.OriginalDefinition, right.OriginalDefinition);
+            return SymbolEqualityComparer.Default.Equals(left, right) || SymbolEqualityComparer.Default.Equals(left.OriginalDefinition, right.OriginalDefinition);
         }
 
         /// <summary>
         /// 语义分析需要的基础元数据引用（不依赖用户具体项目的 MSBuild 引用）
         /// </summary>
-        private static readonly Lazy<IList<MetadataReference>> DefaultMetadataReferences =
-            new Lazy<IList<MetadataReference>>(CreateDefaultReferences, isThreadSafe: true);
+        private static readonly Lazy<IList<MetadataReference>> DefaultMetadataReferences = new Lazy<IList<MetadataReference>>(CreateDefaultReferences, isThreadSafe: true);
 
         private static IList<MetadataReference> CreateDefaultReferences()
         {
@@ -834,8 +825,7 @@ namespace LangCode.Roslyn
         {
             try
             {
-                return root.GetLocation().GetLineSpan().StartLinePosition.Line + 1 +
-                       CountNewlines(root.ToFullString(), position);
+                return root.GetLocation().GetLineSpan().StartLinePosition.Line + 1 + CountNewlines(root.ToFullString(), position);
             }
             catch (Exception)
             {

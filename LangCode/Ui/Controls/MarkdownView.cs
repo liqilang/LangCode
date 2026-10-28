@@ -73,9 +73,7 @@ namespace LangCode.Ui.Controls
             // 长会话滚动时这能省掉大量重复的 Markdown 解析与视觉树构建
             Loaded += (_, __) =>
             {
-                if (_panel != null &&
-                    string.Equals(_pending ?? string.Empty, _rendered, StringComparison.Ordinal) &&
-                    Math.Abs(_renderedScale - Scale) < 0.001)
+                if (_panel != null && string.Equals(_pending ?? string.Empty, _rendered, StringComparison.Ordinal) && Math.Abs(_renderedScale - Scale) < 0.001)
                 {
                     return;
                 }
@@ -171,13 +169,11 @@ namespace LangCode.Ui.Controls
             // 合并同一轮消息循环里的多次增量：只重建一次
             // Render 优先级：与流式吐字同帧完成「改文本 → 重建 Markdown → 布局 → 渲染」，
             // 不会像 Background 那样被排在渲染之后，导致画面比实际内容慢一帧、看起来发顿
-            dispatcher.BeginInvoke(
-                new Action(() =>
-                {
-                    _rebuildScheduled = false;
-                    Rebuild();
-                }),
-                DispatcherPriority.Render);
+            dispatcher.BeginInvoke(new Action(() =>
+            {
+                _rebuildScheduled = false;
+                Rebuild();
+            }), DispatcherPriority.Render);
         }
 
         private void Rebuild()
@@ -185,8 +181,7 @@ namespace LangCode.Ui.Controls
             var text = _pending ?? string.Empty;
             var scale = Scale;
 
-            if (string.Equals(text, _rendered, StringComparison.Ordinal) && _panel != null &&
-                Math.Abs(_renderedScale - scale) < 0.001)
+            if (string.Equals(text, _rendered, StringComparison.Ordinal) && _panel != null && Math.Abs(_renderedScale - scale) < 0.001)
             {
                 return;
             }
@@ -522,9 +517,7 @@ namespace LangCode.Ui.Controls
                 LineHeight = 18,
                 LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
                 MaxWidth = 260,
-                Foreground = isHeader
-                    ? Res("Ap.FgStrong", Color.FromRgb(0xDC, 0xDC, 0xDC))
-                    : Res("Ap.FgBody", Color.FromRgb(0xCF, 0xCF, 0xCF)),
+                Foreground = isHeader ? Res("Ap.FgStrong", Color.FromRgb(0xDC, 0xDC, 0xDC)) : Res("Ap.FgBody", Color.FromRgb(0xCF, 0xCF, 0xCF)),
             };
 
             if (isHeader)
@@ -539,9 +532,7 @@ namespace LangCode.Ui.Controls
                 Padding = new Thickness(9, 6, 9, 6),
                 BorderBrush = Res("Ap.ToolBorder", Color.FromRgb(0x34, 0x34, 0x36)),
                 BorderThickness = new Thickness(0, 0, 1, 1),
-                Background = isHeader
-                    ? Res("Ap.ToolHeadBg", Color.FromRgb(0x26, 0x26, 0x2A))
-                    : null,
+                Background = isHeader ? Res("Ap.ToolHeadBg", Color.FromRgb(0x26, 0x26, 0x2A)) : null,
                 Child = text,
             };
         }

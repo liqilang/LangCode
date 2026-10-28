@@ -105,8 +105,7 @@ namespace LangCode.Chat
             builder.Append(",\"max_tokens\":").Append(request.MaxTokens <= 0 ? 4096 : request.MaxTokens);
             builder.Append(",\"stream\":true");
 
-            var thinking = request.ThinkingBudgetTokens > 0 &&
-                           request.ThinkingBudgetTokens < (request.MaxTokens <= 0 ? 4096 : request.MaxTokens);
+            var thinking = request.ThinkingBudgetTokens > 0 && request.ThinkingBudgetTokens < (request.MaxTokens <= 0 ? 4096 : request.MaxTokens);
 
             // 系统提示词：开了提示缓存就写成带 cache_control 的内容数组（长前缀命中后按折扣价计费）
             if (!string.IsNullOrWhiteSpace(request.SystemPrompt))
@@ -114,8 +113,7 @@ namespace LangCode.Chat
                 builder.Append(",\"system\":");
                 if (request.PromptCaching)
                 {
-                    builder.Append("[{\"type\":\"text\",\"text\":").Append(JsonString(request.SystemPrompt))
-                           .Append(",\"cache_control\":{\"type\":\"ephemeral\"}}]");
+                    builder.Append("[{\"type\":\"text\",\"text\":").Append(JsonString(request.SystemPrompt)).Append(",\"cache_control\":{\"type\":\"ephemeral\"}}]");
                 }
                 else
                 {
@@ -234,11 +232,7 @@ namespace LangCode.Chat
 
         // ==================== 流式解析 ====================
 
-        private static async Task ReadStreamAsync(
-            HttpResponseMessage response,
-            ChatRequest request,
-            Action<string> onDelta,
-            CancellationToken cancellationToken)
+        private static async Task ReadStreamAsync(HttpResponseMessage response, ChatRequest request, Action<string> onDelta, CancellationToken cancellationToken)
         {
             // 工具调用：按内容块下标归并 input_json 分片
             var toolBlocks = new Dictionary<int, ToolAccumulator>();

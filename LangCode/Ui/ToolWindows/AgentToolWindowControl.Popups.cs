@@ -56,9 +56,7 @@ namespace LangCode.Ui.ToolWindows
             SettingsStore.Save(_settings);
             ApplySettingsToUi();
 
-            AddNote(plan
-                ? "已切换到「计划」：我只做调研并给出分步计划，不会修改任何文件确认后点「执行」开始动手"
-                : "已切换到「执行」：现在可以按计划改动文件了");
+            AddNote(plan ? "已切换到「计划」：我只做调研并给出分步计划，不会修改任何文件确认后点「执行」开始动手" : "已切换到「执行」：现在可以按计划改动文件了");
         }
 
         private void AutoChip_Click(object sender, RoutedEventArgs e)
@@ -112,8 +110,7 @@ namespace LangCode.Ui.ToolWindows
                 {
                     foreach (var nested in panel.Children)
                     {
-                        if (nested is System.Windows.Controls.Primitives.ToggleButton toggle &&
-                            toggle.DataContext is ApprovalCategory category)
+                        if (nested is System.Windows.Controls.Primitives.ToggleButton toggle && toggle.DataContext is ApprovalCategory category)
                         {
                             toggle.IsChecked = ApprovalCatalog.IsOn(_settings, category);
                         }
@@ -135,16 +132,14 @@ namespace LangCode.Ui.ToolWindows
                 // 先把弹层打开 —— 视觉上立刻响应；内容放到后台优先级再填。
                 // 列表可能上百条且不做虚拟化，同步构建 + 布局会让「点下去半天没反应」。
                 ModelPopup.IsOpen = true;
-                Dispatcher.BeginInvoke(
-                    new Action(() =>
-                    {
-                        // 重建时按「有无档案」切标题与内置模型表的显隐
-                        BuildProfileList();
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    // 重建时按「有无档案」切标题与内置模型表的显隐
+                    BuildProfileList();
 
-                        // 只列「设置里已配置好」的模型；拉取 / 新增模型一律在设置页完成
-                        RefreshModelList();
-                    }),
-                    DispatcherPriority.Background);
+                    // 只列「设置里已配置好」的模型；拉取 / 新增模型一律在设置页完成
+                    RefreshModelList();
+                }), DispatcherPriority.Background);
             }
             else
             {
@@ -164,17 +159,14 @@ namespace LangCode.Ui.ToolWindows
 
             ProfileList.Items.Clear();
 
-            var profiles = (_settings.NamedProfiles ?? [])
-                .Where(p => !string.IsNullOrWhiteSpace(p.Name))
-                .ToList();
+            var profiles = (_settings.NamedProfiles ?? []).Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
 
             // 有「配置好的」命名档案时：弹层只列档案，内置模型表收起；
             // 一个档案都没有（首次使用）才回退到内置模型表，免得没得选
             var hasProfiles = profiles.Count > 0;
             ProfileSection.Visibility = hasProfiles ? Visibility.Visible : Visibility.Collapsed;
 
-            var host = (LogicalTreeHelper.GetParent(ProfileSection) as Panel)
-                ?? (VisualTreeHelper.GetParent(ProfileSection) as Panel);
+            var host = (LogicalTreeHelper.GetParent(ProfileSection) as Panel) ?? (VisualTreeHelper.GetParent(ProfileSection) as Panel);
             if (host != null)
             {
                 foreach (var child in host.Children)
@@ -306,8 +298,7 @@ namespace LangCode.Ui.ToolWindows
             _modelListGroups = groups;
             ModelList.ItemsSource = groups;
 
-            Chat.ChatDiagnostics.Log("模型弹层列表（仅已配置）：分组 " + groups.Count
-                + "，条目 " + groups.Sum(g => g.Models.Count));
+            Chat.ChatDiagnostics.Log("模型弹层列表（仅已配置）：分组 " + groups.Count + "，条目 " + groups.Sum(g => g.Models.Count));
         }
 
         /// <summary>
@@ -331,8 +322,7 @@ namespace LangCode.Ui.ToolWindows
             // 只在内存里已有目录时取友好名 / 颜色（TryFind 不触发任何加载），拿不到就用 id + 中性色
             var info = ModelCatalog.TryFind(modelKey);
 
-            var existing = groups.FirstOrDefault(g =>
-                string.Equals(g.Provider, providerKey, StringComparison.OrdinalIgnoreCase));
+            var existing = groups.FirstOrDefault(g => string.Equals(g.Provider, providerKey, StringComparison.OrdinalIgnoreCase));
 
             if (existing == null)
             {
@@ -439,9 +429,7 @@ namespace LangCode.Ui.ToolWindows
 
                 // 延后到下一次消息循环再重刷：此刻正在处理这颗按钮的 Click，
                 // 立即 Clear() 会把它从可视树上摘掉
-                Dispatcher.BeginInvoke(
-                    new Action(() => SwitchMentionView(view)),
-                    DispatcherPriority.Background);
+                Dispatcher.BeginInvoke(new Action(() => SwitchMentionView(view)), DispatcherPriority.Background);
                 return;
             }
 

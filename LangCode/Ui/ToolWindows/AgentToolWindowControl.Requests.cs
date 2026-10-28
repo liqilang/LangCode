@@ -222,9 +222,7 @@ namespace LangCode.Ui.ToolWindows
             RequestDetail.Text = detail;
             RequestDetail.Visibility = detail.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-            RequestBarPanel.Visibility = actions.Count > 0 || RequestTitle.Text.Length > 0
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+            RequestBarPanel.Visibility = actions.Count > 0 || RequestTitle.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
 
         /// <summary>
@@ -241,15 +239,12 @@ namespace LangCode.Ui.ToolWindows
             if (_pendingCard != null)
             {
                 var path = _pendingCard.Path;
-                return string.IsNullOrWhiteSpace(path)
-                    ? _pendingCard.Title
-                    : _pendingCard.Title + " · " + path;
+                return string.IsNullOrWhiteSpace(path) ? _pendingCard.Title : _pendingCard.Title + " · " + path;
             }
 
             if (_turnEdits.Count > 0)
             {
-                return "本轮改动 " + _turnEdits.Count + " 处：" +
-                       string.Join("、", _turnEdits.Select(edit => edit.RelativePath).Distinct().Take(3));
+                return "本轮改动 " + _turnEdits.Count + " 处：" + string.Join("、", _turnEdits.Select(edit => edit.RelativePath).Distinct().Take(3));
             }
 
             return string.Empty;
@@ -351,13 +346,9 @@ namespace LangCode.Ui.ToolWindows
                 ApprovalIcon.IconName = isDiff ? "edit" : "zap";
 
                 // 元信息：差异卡显示 +N −N，其余显示目标路径
-                var meta = isDiff
-                    ? card.AddLabel + " " + card.DeleteLabel
-                    : (card.Path ?? string.Empty);
+                var meta = isDiff ? card.AddLabel + " " + card.DeleteLabel : (card.Path ?? string.Empty);
                 ApprovalMeta.Text = meta;
-                ApprovalMeta.Visibility = string.IsNullOrWhiteSpace(meta)
-                    ? Visibility.Collapsed
-                    : Visibility.Visible;
+                ApprovalMeta.Visibility = string.IsNullOrWhiteSpace(meta) ? Visibility.Collapsed : Visibility.Visible;
 
                 // 详情：差异卡给 diff 行，操作确认卡给纯文本；两者都没有就不显示「查看详情」
                 var hasDetail = isDiff || !string.IsNullOrWhiteSpace(card.Text);
@@ -366,9 +357,7 @@ namespace LangCode.Ui.ToolWindows
                 ApprovalDiff.ItemsSource = isDiff ? card.Lines : null;
                 ApprovalDiff.Visibility = isDiff ? Visibility.Visible : Visibility.Collapsed;
                 ApprovalDetailText.Text = isDiff ? string.Empty : (card.Text ?? string.Empty);
-                ApprovalDetailText.Visibility = !isDiff && !string.IsNullOrWhiteSpace(card.Text)
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
+                ApprovalDetailText.Visibility = !isDiff && !string.IsNullOrWhiteSpace(card.Text) ? Visibility.Visible : Visibility.Collapsed;
 
                 // 新一次审批：详情默认收起，箭头朝下
                 ApprovalDetail.Visibility = Visibility.Collapsed;
@@ -465,9 +454,7 @@ namespace LangCode.Ui.ToolWindows
                 return;
             }
 
-            var text = message.IsUser
-                ? message.Text
-                : LangCode.Chat.ChatSession.PlainTextOf(message);
+            var text = message.IsUser ? message.Text : LangCode.Chat.ChatSession.PlainTextOf(message);
 
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -725,9 +712,7 @@ namespace LangCode.Ui.ToolWindows
 
             var result = _workspace.Revert(edit);
 
-            AddNote(result != null && result.Ok
-                ? "已撤销上一步改动：" + edit.RelativePath
-                : "撤销失败：" + (result?.Output ?? "没有可撤销的改动"));
+            AddNote(result != null && result.Ok ? "已撤销上一步改动：" + edit.RelativePath : "撤销失败：" + (result?.Output ?? "没有可撤销的改动"));
 
             RefreshRequestBar();
             UpdateTokens();
@@ -757,9 +742,7 @@ namespace LangCode.Ui.ToolWindows
             assistant?.Blocks.Add(new ChatBlock
             {
                 Kind = ChatBlockKind.Note,
-                Text = count > 0
-                        ? "已撤销 " + count + " 处改动，文件已还原到本轮之前"
-                        : "撤销失败：文件可能已被移动或删除",
+                Text = count > 0 ? "已撤销 " + count + " 处改动，文件已还原到本轮之前" : "撤销失败：文件可能已被移动或删除",
             });
 
             RefreshRequestBar();
@@ -827,8 +810,7 @@ namespace LangCode.Ui.ToolWindows
                 _pendingApproval = new TaskCompletionSource<bool>();
 
                 // 上面等信号量的 await 之后要重新确保回到 UI 线程（通知与界面更新都需要）
-                await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory
-                    .SwitchToMainThreadAsync();
+                await Microsoft.VisualStudio.Shell.ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
                 // 待批是阻塞的：用户在别的窗口时也要能立刻知道「这里卡住了」
                 NotifyIfEnabled("LangCode：有一个操作等待你确认", beep: true);

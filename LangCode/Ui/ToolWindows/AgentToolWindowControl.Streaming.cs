@@ -101,9 +101,7 @@ namespace LangCode.Ui.ToolWindows
         private int CountReveal(int backlog)
         {
             var now = DateTime.UtcNow;
-            var dtMs = _revealLastUtc == DateTime.MinValue
-                ? RevealInterval.TotalMilliseconds
-                : (now - _revealLastUtc).TotalMilliseconds;
+            var dtMs = _revealLastUtc == DateTime.MinValue ? RevealInterval.TotalMilliseconds : (now - _revealLastUtc).TotalMilliseconds;
             _revealLastUtc = now;
 
             // 首次、时钟回拨或卡顿太久：按一帧算，避免一次性吐一大段
@@ -333,9 +331,7 @@ namespace LangCode.Ui.ToolWindows
             // 输出太长就不再往卡片里堆：最终结果卡里另有一份（按 MaxOutputChars 截断过的）
             if (_liveCommandCard.Text.Length < 8000 && text.Length > 0)
             {
-                _liveCommandCard.Text = _liveCommandCard.Text.Length == 0
-                    ? text
-                    : _liveCommandCard.Text + "\n" + text;
+                _liveCommandCard.Text = _liveCommandCard.Text.Length == 0 ? text : _liveCommandCard.Text + "\n" + text;
             }
 
             // 命令输出期间同样节流：每秒 5 次全量令牌遍历没必要
@@ -434,9 +430,7 @@ namespace LangCode.Ui.ToolWindows
             }
 
             var seconds = (DateTime.UtcNow - _thinkingStartedUtc).TotalSeconds;
-            return seconds < 60
-                ? seconds.ToString("0.0") + "s"
-                : (int)(seconds / 60) + "m" + (int)(seconds % 60) + "s";
+            return seconds < 60 ? seconds.ToString("0.0") + "s" : (int)(seconds / 60) + "m" + (int)(seconds % 60) + "s";
         }
 
         /// <summary>
@@ -532,9 +526,7 @@ namespace LangCode.Ui.ToolWindows
 
             // 生成中按钮**仍然是发送**：点它就是排队，不会再有「发送/停止」两副面孔
             SendIcon.IconName = "send-up";
-            SendBtn.ToolTip = busy
-                ? "发送（当前任务结束后自动开始）(Ctrl+Enter)"
-                : "发送 (Ctrl+Enter)";
+            SendBtn.ToolTip = busy ? "发送（当前任务结束后自动开始）(Ctrl+Enter)" : "发送 (Ctrl+Enter)";
             SendBtn.IsEnabled = hasInput;
 
             RefreshRequestBar();
@@ -556,9 +548,7 @@ namespace LangCode.Ui.ToolWindows
             var firstUser = _session.Messages
                 .FirstOrDefault(message => message.IsUser && !string.IsNullOrWhiteSpace(message.Text));
 
-            SessionTitle.Text = firstUser != null
-                ? firstUser.Text.Trim()
-                : "新会话";
+            SessionTitle.Text = firstUser != null ? firstUser.Text.Trim() : "新会话";
             SessionTitle.ToolTip = SessionTitle.Text;
 
             if (LiveDot != null)
