@@ -1068,6 +1068,20 @@
                                            Margin="0,5,0,0"
                                            TextWrapping="Wrap"/>
                             </StackPanel>
+
+                            <StackPanel Margin="0,4,0,0">
+                                <TextBlock Text="验证轮次上限"
+                                           Style="{StaticResource TdFieldLabel}"
+                                           Margin="0,0,0,5"/>
+                                <TextBox Style="{StaticResource FieldControl}"
+                                         Tag="AutoVerifyMaxRounds"
+                                         TextChanged="TextOption_Changed"
+                                         Text="2"/>
+                                <TextBlock Text="每轮修复产生新改动后才会重新验证；达到上限后停止，避免反复验证拖长任务"
+                                           Style="{StaticResource TdFieldHint}"
+                                           Margin="0,5,0,0"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
                         </StackPanel>
 
                         <!-- 高级能力：语义索引 / 结构化编辑 / 浏览器自动化 / 多模态图片 -->

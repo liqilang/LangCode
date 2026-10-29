@@ -1,6 +1,6 @@
 # 工具参考
 
-> 本文列出 LangCode 暴露给模型的全部 30 个工具、参数、执行路径与审批类别。工具定义的唯一来源是 [`ToolCatalog.cs`](../LangCode/Agent/ToolCatalog.cs)，新增工具只需要改那一处，schema、系统提示词与审批映射会同步生成。
+> 本文列出 LangCode 暴露给模型的全部 36 个工具、参数、执行路径与审批类别。工具定义的唯一来源是 [`ToolCatalog.cs`](../LangCode/Agent/ToolCatalog.cs)，新增工具只需要改那一处，schema、系统提示词与审批映射会同步生成。
 >
 > 维护提示：新增 / 修改工具时，请同步更新本文的「工具总表」与「审批与安全」两节。
 
@@ -88,6 +88,17 @@
 | `mcp_call`       | 调用已启用 MCP 服务器上的工具                                        | `server`、`tool`、`arguments`                  | External | MCP                                             | 是     |
 | `debug_inspect`  | 只读查看调试器                                                       | `action`、`expression`、`limit`                | External | 读取                                            | 否     |
 | `debug_control`  | 控制调试器（断点 / 继续 / 单步 / 暂停 / 停止）                       | `action`、`path`、`line`、`condition`          | External | 命令                                            | 是     |
+
+### 3.6 Git 工作流
+
+| 工具         | 作用                                           | 主要参数                 | 分派     | 审批类别 | 破坏性 |
+| ------------ | ---------------------------------------------- | ------------------------ | -------- | -------- | ------ |
+| `git_status` | 查看当前分支与未提交 / 已暂存 / 未跟踪文件     | 无                       | Local    | 读取     | 否     |
+| `git_diff`   | 查看工作区或暂存区差异，可按文件过滤或只看统计 | `staged`、`path`、`stat` | Local    | 读取     | 否     |
+| `git_log`    | 查看最近提交（oneline）                        | `limit`、`path`          | Local    | 读取     | 否     |
+| `git_show`   | 查看某个提交的详情与改动                       | `rev`、`stat`            | Local    | 读取     | 否     |
+| `git_stage`  | 暂存指定文件或全部改动（敏感文件会被拒绝）     | `paths`、`all`           | External | 命令     | 是     |
+| `git_commit` | 提交已暂存改动（不会自动 push）                | `message`、`add_all`     | External | 命令     | 是     |
 
 ---
 
@@ -386,6 +397,34 @@
 - 目标已存在（文件或目录）时拒绝；目标目录会自动创建。
 - 撤销时会检查目标文件在移动后是否被修改过，避免覆盖新内容。
 
+### 4.18 Git 工具
+
+审查未提交改动：
+
+```json
+{ "tool": "git_status" }
+```
+
+```json
+{ "tool": "git_diff", "staged": "false", "path": "src/App.tsx" }
+```
+
+生成并执行提交：
+
+```json
+{ "tool": "git_stage", "paths": "src/App.tsx\nsrc/theme.ts" }
+```
+
+```json
+{ "tool": "git_commit", "message": "feat: 登录页增加表单校验" }
+```
+
+- `git_diff` 默认看工作区差异；`staged=true` 看暂存区；`stat=true` 只看文件级统计。
+- `git_show` 的 `rev` 只接受 `HEAD`、`HEAD~1`、分支名、标签或提交哈希；不允许以 `-` 开头。
+- `git_stage` / `git_commit` 默认需要用户确认；`git_commit` 不会自动 push。
+- 暂存与提交都会检查敏感文件（`.env`、密钥、证书等），命中直接拒绝；确需提交时先在工作区策略里显式放行。
+- `/review` 与 `/commit` 已改为优先使用这些工具，不再要求模型用 `run_command` 手写 git 命令。
+
 ---
 
 ## 5. 长任务编排示例
@@ -435,6 +474,8 @@
 | 只读工具（读 / 搜 / 符号 / 语义 / 文档 / 类型 / 调试查看）                    | 否                   |
 | `write_file` / `replace_in_file` / `edit_symbol`                              | 是                   |
 | `delete_file` / `move_file`                                                   | 是                   |
+| `git_status` / `git_diff` / `git_log` / `git_show`                            | 否                   |
+| `git_stage` / `git_commit`                                                    | 是                   |
 | `apply_patch` / `rename_symbol`                                               | 是（逐节 / 逐文件）  |
 | `run_command` / `run_tests` / `debug_control`                                 | 是                   |
 | `open_url` / `web_search` / `browser_action`                                  | 是                   |
@@ -460,5 +501,6 @@
 | 命令安全策略                      | [`CommandPolicy.cs`](../LangCode/Workspace/CommandPolicy.cs)                                                                                 |
 | 浏览器自动化                      | [`BrowserAutomation.cs`](../LangCode/Workspace/BrowserAutomation.cs)                                                                         |
 | 工作区文件操作                    | [`FileSystemWorkspace.cs`](../LangCode/Workspace/FileSystemWorkspace.cs)                                                                     |
+| Git 工具                          | [`GitWorkspace.cs`](../LangCode/Workspace/GitWorkspace.cs)                                                                                   |
 | Roslyn 分析                       | [`RoslynCodeService.cs`](../LangCode/Roslyn/RoslynCodeService.cs)                                                                            |
 | MCP                               | [`McpManager.cs`](../LangCode/Mcp/McpManager.cs)、[`McpClient.cs`](../LangCode/Mcp/McpClient.cs)                                             |

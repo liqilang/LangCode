@@ -636,6 +636,12 @@ namespace LangCode.Ui.ToolWindows
                 case "goto_definition": return "转到定义";
                 case "debug_inspect": return "调试检查";
                 case "debug_control": return "调试控制";
+                case "git_status": return "Git 状态";
+                case "git_diff": return "Git 差异";
+                case "git_log": return "Git 历史";
+                case "git_show": return "Git 提交详情";
+                case "git_stage": return "Git 暂存";
+                case "git_commit": return "Git 提交";
                 default: return toolName ?? string.Empty;
             }
         }
@@ -664,6 +670,47 @@ namespace LangCode.Ui.ToolWindows
                 var paths = action.Get("paths") ?? string.Empty;
                 var count = paths.Split(new[] { '\n', '\r', ';', ',', '|' }, StringSplitOptions.RemoveEmptyEntries).Length;
                 return count > 0 ? count + " 个文件" : string.Empty;
+            }
+
+            // Git：副标题显示「看哪一段 / 提交什么」，比只写工具名更有辨识度
+            if (action.Name == "git_diff")
+            {
+                var scope = action.Get("path");
+                if (!string.IsNullOrWhiteSpace(scope))
+                {
+                    return scope;
+                }
+
+                return string.Equals(action.Get("staged"), "true", StringComparison.OrdinalIgnoreCase) ? "暂存区" : "工作区";
+            }
+
+            if (action.Name == "git_status")
+            {
+                return "工作区";
+            }
+
+            if (action.Name == "git_log")
+            {
+                var logPath = action.Get("path");
+                return string.IsNullOrWhiteSpace(logPath) ? "最近提交" : logPath;
+            }
+
+            if (action.Name == "git_show")
+            {
+                return action.Get("rev") ?? "HEAD";
+            }
+
+            if (action.Name == "git_stage")
+            {
+                var stagePaths = action.Get("paths") ?? string.Empty;
+                return string.Equals(action.Get("all"), "true", StringComparison.OrdinalIgnoreCase) ? "全部改动" : stagePaths.Replace('\n', ' ').Replace('\r', ' ').Trim();
+            }
+
+            if (action.Name == "git_commit")
+            {
+                var message = (action.Get("message") ?? string.Empty).Trim();
+                var firstLine = message.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+                return string.IsNullOrWhiteSpace(firstLine) ? "提交" : firstLine;
             }
 
             var path = action.Get("path");
@@ -698,8 +745,7 @@ namespace LangCode.Ui.ToolWindows
             if (string.IsNullOrWhiteSpace(path))
             {
                 var verb = action.Get("action");
-                if (!string.IsNullOrWhiteSpace(verb) &&
-                    (action.Name == "debug_inspect" || action.Name == "debug_control" || action.Name == "browser_action"))
+                if (!string.IsNullOrWhiteSpace(verb) && (action.Name == "debug_inspect" || action.Name == "debug_control" || action.Name == "browser_action"))
                 {
                     path = verb;
                     var expression = action.Get("expression");

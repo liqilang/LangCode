@@ -424,6 +424,12 @@ namespace LangCode.Domain.Settings
         public bool AutoVerify { get; set; } = true;
 
         /// <summary>
+        /// 自动验证最多跑几轮：每次模型修完并产生新落盘改动后才会重跑，防止「改一处验一次」。
+        /// </summary>
+        [DataMember(Name = "autoVerifyMaxRounds", Order = 89)]
+        public int AutoVerifyMaxRounds { get; set; } = 2;
+
+        /// <summary>
         /// 验证命令（如 <c>dotnet build</c> / <c>npm test</c>）；留空表示不做自动验证
         /// </summary>
         [DataMember(Name = "verifyCommand", Order = 85)]
@@ -1076,6 +1082,12 @@ namespace LangCode.Domain.Settings
                 AutoFixMaxRounds = defaults.AutoFixMaxRounds;
             }
 
+            // 自动验证轮次：旧设置缺该字段时是 0，同样兜回默认值
+            if (AutoVerifyMaxRounds <= 0)
+            {
+                AutoVerifyMaxRounds = defaults.AutoVerifyMaxRounds;
+            }
+
             VerifyCommand ??= string.Empty;
 
             // 网络搜索 / 文档检索：空值或越界时兜回默认值
@@ -1242,6 +1254,7 @@ namespace LangCode.Domain.Settings
             AutoFixProblems = source.AutoFixProblems;
             AutoFixMaxRounds = source.AutoFixMaxRounds;
             AutoVerify = source.AutoVerify;
+            AutoVerifyMaxRounds = source.AutoVerifyMaxRounds;
             VerifyCommand = source.VerifyCommand;
             BudgetUsd = source.BudgetUsd;
             AuditLogEnabled = source.AuditLogEnabled;
@@ -1343,6 +1356,7 @@ namespace LangCode.Domain.Settings
                 AutoFixProblems = AutoFixProblems,
                 AutoFixMaxRounds = AutoFixMaxRounds,
                 AutoVerify = AutoVerify,
+                AutoVerifyMaxRounds = AutoVerifyMaxRounds,
                 VerifyCommand = VerifyCommand,
                 BudgetUsd = BudgetUsd,
                 AuditLogEnabled = AuditLogEnabled,

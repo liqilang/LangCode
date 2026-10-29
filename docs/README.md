@@ -9,7 +9,7 @@
 | [安装与分发](install.md)           | 使用者              | 下载、安装、升级、卸载、首次配置与常见问题                                                |
 | [AI 与自动化能力总览](ai-agent.md) | 使用者 / 二次开发者 | Agent 循环、子任务、任务清单、主动提问、计划模式、自动验证/修复、上下文与成本、安全与回退 |
 | [工作区权限策略](policy.md)        | 使用者 / 二次开发者 | `.langcode/policy.json` 字段、审批模式、会话授权、敏感文件与 SSRF 守卫                    |
-| [工具参考](tools.md)               | 使用者 / 二次开发者 | 全部 30 个工具的参数、审批类别、破坏性标记、调用协议与示例                                |
+| [工具参考](tools.md)               | 使用者 / 二次开发者 | 全部 36 个工具的参数、审批类别、破坏性标记、调用协议与示例                                |
 | [项目 README](../README.md)        | 第一次接触项目的人  | 下载安装、快速开始、界面截图、模型支持、项目结构                                          |
 
 ## 先认识几个词
@@ -55,10 +55,14 @@ Agent 循环（AgentRunner）
    │    ├─ apply_patch（多文件补丁）
    │    └─ rename_symbol（Roslyn 跨文件重命名）
    │
+   ├─ Git 工作流
+   │    ├─ git_status / git_diff / git_log / git_show
+   │    └─ git_stage / git_commit（审批后提交，不 push）
+   │
    ├─ 执行与验证
    │    ├─ run_command / run_tests
-   │    ├─ 自动验证（改完自动跑验证命令）
-   │    └─ 自动修复（读编译诊断，最多 N 轮）
+   │    ├─ 自动验证（有新改动才重跑，最多 N 轮）
+   │    └─ 自动修复（测试失败 / 编译诊断）
    │
    └─ 外部能力
         ├─ web_search / open_url / browser_action
@@ -82,6 +86,7 @@ Agent 循环（AgentRunner）
 | 检查点                                                | [`CheckpointStore.cs`](../LangCode/Workspace/CheckpointStore.cs)                                |
 | 项目规则                                              | [`ProjectRules.cs`](../LangCode/Workspace/ProjectRules.cs)                                      |
 | 工具链探测                                            | [`ToolchainDetector.cs`](../LangCode/Workspace/ToolchainDetector.cs)                            |
+| Git 状态 / 差异 / 暂存 / 提交                         | [`GitWorkspace.cs`](../LangCode/Workspace/GitWorkspace.cs)                                      |
 | 命令安全策略                                          | [`CommandPolicy.cs`](../LangCode/Workspace/CommandPolicy.cs)                                    |
 | 子任务卡 / 任务卡 / 提问卡 UI                         | [`AgentToolWindowControl.Cards.cs`](../LangCode/Ui/ToolWindows/AgentToolWindowControl.Cards.cs) |
 | 每轮调用与检查点 UI                                   | [`AgentToolWindowControl.Turns.cs`](../LangCode/Ui/ToolWindows/AgentToolWindowControl.Turns.cs) |

@@ -206,9 +206,29 @@ namespace LangCode.Agent
         private bool _editApplied;
 
         /// <summary>
-        /// 本轮是否已经跑过一次自动验证（只跑一次，避免改一处验一次）
+        /// 本轮已经跑过几轮自动验证（受设置里的「验证轮次上限」约束）
         /// </summary>
-        private bool _verifiedThisRun;
+        private int _verifyRounds;
+
+        /// <summary>
+        /// 上一次自动验证时的落盘改动序号：没有新改动就不重复验证
+        /// </summary>
+        private int _lastVerifyEditCount = -1;
+
+        /// <summary>
+        /// 本轮成功落盘的改动次数（每次 Apply 成功后自增）
+        /// </summary>
+        private int _editCount;
+
+        /// <summary>
+        /// 最近一次 run_tests 的失败输出：模型收尾时再回灌一次，确保它真的处理失败
+        /// </summary>
+        private string _lastTestFailure;
+
+        /// <summary>
+        /// 最近一次测试失败是否已经回灌过，避免重复提示
+        /// </summary>
+        private bool _lastTestFailureFed;
 
         /// <summary>
         /// 本轮已经回灌了几轮自动修复（受设置里的上限约束）
@@ -396,7 +416,11 @@ namespace LangCode.Agent
 
             // 每轮重置自动化状态：上一次 run 的「改过没有 / 验过没有 / 修了几轮」不该串到这一轮
             _editApplied = false;
-            _verifiedThisRun = false;
+            _verifyRounds = 0;
+            _lastVerifyEditCount = -1;
+            _editCount = 0;
+            _lastTestFailure = null;
+            _lastTestFailureFed = false;
             _fixRounds = 0;
 
             // 压缩相关的运行态同样每轮重置：本次任务最初的轮次构成「冻结前缀」，
@@ -684,6 +708,9 @@ namespace LangCode.Agent
                     }
 
                     callbacks.OnToolResult?.Invoke(action, result);
+
+                    // 记录测试失败：模型可能收尾时忘了处理，自动 follow-up 会再提醒一次
+                    TrackTestResult(action, result);
 
                     // 单条结果也过一道预算：一次 read_file / 命令输出就能有几万字符，
                     // 原样留在历史里意味着后面每一步都要重发
@@ -1056,6 +1083,7 @@ namespace LangCode.Agent
             {
                 // 有改动落盘 = 值得跑自动验证 / 自动修复（见 BuildFollowUpAsync）
                 _editApplied = true;
+                _editCount++;
                 callbacks.OnEditApplied?.Invoke(pending);
 
                 // 改过文件后语义索引 / 仓库地图立刻失效：下一次检索或下一轮提示重建

@@ -49,7 +49,7 @@ namespace LangCode.Agent
             if (settings != null && settings.PlanMode)
             {
                 builder.AppendLine("【当前处于规划模式】");
-                builder.AppendLine("- 禁止修改任何文件、禁止执行命令、禁止调用 MCP / 打开网页；本轮**只提供只读工具**（list_files / read_file / search_text / list_symbols / find_references / semantic_search 等）");
+                builder.AppendLine("- 禁止修改任何文件、禁止执行命令、禁止调用 MCP / 打开网页；本轮**只提供只读工具**（list_files / read_file / search_text / list_symbols / find_references / semantic_search / git_status / git_diff 等）");
                 builder.AppendLine("- 先把现状看明白，再用 update_todo_list 给出分步计划，并说明关键假设、风险与取舍");
                 builder.AppendLine("- 计划要具体到「改哪个文件的哪一部分」，但此刻不要动手；用户确认后会把模式切到执行");
                 builder.AppendLine();
@@ -70,6 +70,7 @@ namespace LangCode.Agent
             builder.AppendLine("- 需求不明确、或存在多个合理方案时，用 ask_followup_question 问清楚再动手，不要自己替用户拍板");
             builder.AppendLine("- 某块工作相对独立、且子任务本身也要多步才能完成时，才用 new_task 拆出去；不要为了走流程而拆一个一句话就能做完的子任务");
             builder.AppendLine("- 需要文件内容时**必须先读**（read_file / search_text），不要凭猜测编造文件内容");
+            builder.AppendLine("- 审查或提交 Git 改动时使用 git_status / git_diff / git_log / git_show，不要用 run_command 手写 git 命令；提交前先复核差异，再调用 git_stage / git_commit（不会自动 push）");
             builder.AppendLine("- 先定位再精读：不知道代码在哪就先用 semantic_search（正文 / 符号 / 路径混合检索）/ search_text / list_symbols 缩小范围，**不要**一上来就整文件读，那最占上下文");
             builder.AppendLine("- 需要项目自己的说明 / 设计 / 配置时，先用 search_docs；需要最新外部资料 / 官方文档 / 报错线索时，先用 web_search，再按需用 open_url 读正文");
             builder.AppendLine("- 读文件尽量带 start_line / end_line 只取需要的片段；同一个文件里已经读过的部分不要反复重读");

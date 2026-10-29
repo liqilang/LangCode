@@ -327,27 +327,35 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 
 - 本轮真的落盘过文件（`_editApplied`）；
 - 开启了 `AutoVerify`；
-- 本轮还没验证过；
-- 有验证命令（用户填的优先，否则用自动探测）。
+- 有验证命令（用户填的优先，否则用自动探测）；
+- 自上次验证之后**又产生了新的落盘改动**；
+- 还没达到 `AutoVerifyMaxRounds`（默认 2）。
 
 行为：
 
-- 只跑一次，避免改一处验一次；
-- 结果回灌给模型；
-- 通过则让模型收尾，失败则要求定位根因并最小改动。
+- 每轮修复产生新改动后才会重新验证，避免「改一处验一次」；
+- 验证失败会把输出回灌给模型，要求定位根因并最小改动；修好后自动再次验证；
+- 达到轮次上限后停止，避免反复验证把任务拖长；
+- 验证通过后才继续检查下一步（测试失败 / 编译诊断）。
 
 ### 7.3 自动修复
 
+自动修复有两个来源，按顺序处理：
+
+1. **最近一次 `run_tests` 失败**：模型收尾时若没有处理，会把失败输出再回灌一次；
+2. **Visual Studio 错误列表**：开启 `AutoFixProblems` 后，读取编译错误并回灌。
+
 条件：
 
-- 开启了 `AutoFixProblems`；
 - 本轮改过文件；
-- 自动修复轮次未超过 `AutoFixMaxRounds`（默认 2）；
-- 能从 Visual Studio「错误列表」读到编译错误（受 `AutoReadProblems` 控制）。
+- 开启了 `AutoFixProblems`；
+- 测试失败回灌只做一次，避免重复打扰；
+- 编译诊断回灌受 `AutoFixMaxRounds`（默认 2）限制；
+- 能读到编译错误（受 `AutoReadProblems` 控制）。
 
 行为：
 
-- 把错误列表回灌给模型，要求只改相关文件；
+- 要求模型只改相关文件、最小改动；
 - 达到轮次上限就停止，避免反复修不好把任务拖长；
 - 子任务内不执行自动修复。
 
@@ -363,6 +371,8 @@ LangCode 不是「把代码贴给 AI」的聊天框，而是一个**有工作区
 ### 7.5 源码位置
 
 - 自动验证 / 自动修复：[`AgentRunner.Automation.cs`](../LangCode/Agent/AgentRunner.Automation.cs)
+- 验证 / 修复轮次与落盘计数：[`AgentRunner.cs`](../LangCode/Agent/AgentRunner.cs)
+- 验证轮次设置：[`AppSettings.cs`](../LangCode/Domain/Settings/AppSettings.cs)
 - 工具链探测：[`ToolchainDetector.cs`](../LangCode/Workspace/ToolchainDetector.cs)
 - 每轮收尾与通知：[`AgentToolWindowControl.Turns.cs`](../LangCode/Ui/ToolWindows/AgentToolWindowControl.Turns.cs)
 

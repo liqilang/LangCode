@@ -46,7 +46,7 @@ namespace LangCode.Agent
                 {
                     Ok = false,
                     Output = "当前处于「规划模式」：不允许修改文件、执行命令或调用外部工具" +
-                             "请只用 list_files / read_file / search_text 调研，并用 update_todo_list 给出分步计划",
+                             "请只用 list_files / read_file / search_text / git_status / git_diff 等只读工具调研，并用 update_todo_list 给出分步计划",
                 };
             }
 
@@ -151,6 +151,23 @@ namespace LangCode.Agent
         {
             switch (action.Name)
             {
+                case "git_stage":
+                    {
+                        var all = ParseBool(action.Get("all"));
+                        var paths = (action.Get("paths") ?? string.Empty).Trim();
+                        return all
+                            ? "将要暂存当前工作区的全部改动（git add -A）"
+                            : "将要暂存：\n" + (paths.Length == 0 ? "（未指定路径）" : paths);
+                    }
+
+                case "git_commit":
+                    {
+                        var message = (action.Get("message") ?? string.Empty).Trim();
+                        var addAll = ParseBool(action.Get("add_all"));
+                        return "将要提交" + (addAll ? "（先暂存全部改动）" : "（只提交已暂存内容）") + "：\n" +
+                               (message.Length == 0 ? "（提交信息为空）" : message);
+                    }
+
                 case "run_command":
                     return "将要执行命令：\n" + _commands.Describe(action.Get("command"), action.Get("working_directory"));
 
@@ -314,6 +331,28 @@ namespace LangCode.Agent
 
                 case "move_file":
                     return _workspace.PrepareMove(action.Get("from"), action.Get("to"));
+
+                case "git_status":
+                    return GitWorkspace.Status(_workspace?.Root);
+
+                case "git_diff":
+                    return GitWorkspace.Diff(
+                        _workspace?.Root,
+                        ParseBool(action.Get("staged")),
+                        action.Get("path"),
+                        ParseBool(action.Get("stat")));
+
+                case "git_log":
+                    return GitWorkspace.Log(
+                        _workspace?.Root,
+                        ParseInt(action.Get("limit")) ?? 20,
+                        action.Get("path"));
+
+                case "git_show":
+                    return GitWorkspace.Show(
+                        _workspace?.Root,
+                        action.Get("rev"),
+                        ParseBool(action.Get("stat")));
 
                 default:
                     return new ToolResult { Ok = false, Output = "✗ 未知工具：" + action.Name };

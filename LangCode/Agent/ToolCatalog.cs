@@ -181,6 +181,24 @@ namespace LangCode.Agent
 
             new ToolDescriptor("move_file", "移动或重命名文件（需审批；不会自动改引用）", "{\"from\":{\"type\":\"string\"},\"to\":{\"type\":\"string\"}}", "[\"from\",\"to\"]", ToolDispatch.Local, true, ApprovalCatalog.Edit, 30,
                 "移动 / 重命名文件：{\"tool\":\"move_file\",\"from\":\"src/Old.tsx\",\"to\":\"src/new/Old.tsx\"}\n   · 目标已存在时拒绝覆盖；目标目录会自动创建；落盘前会出确认卡\n   · 只移动文件本身，不会自动更新 import / 引用；C# 符号重命名请用 rename_symbol"),
+
+            new ToolDescriptor("git_status", "查看 git 工作区状态（当前分支 + 未提交改动）", "{}", "[]", ToolDispatch.Local, false, ApprovalCatalog.Read, 31,
+                "Git 状态：{\"tool\":\"git_status\"}\n   · 返回当前分支、已暂存 / 未暂存 / 未跟踪的文件；审查改动与生成提交信息前先看它"),
+
+            new ToolDescriptor("git_diff", "查看 git 差异（工作区 / 暂存区，可按文件过滤）", "{\"staged\":{\"type\":\"string\",\"description\":\"填 true 查看已暂存差异（git diff --cached）\"},\"path\":{\"type\":\"string\"},\"stat\":{\"type\":\"string\",\"description\":\"填 true 只看统计\"}}", "[]", ToolDispatch.Local, false, ApprovalCatalog.Read, 32,
+                "Git 差异：{\"tool\":\"git_diff\"} 或 {\"tool\":\"git_diff\",\"staged\":\"true\",\"path\":\"src/App.tsx\"}\n   · 默认看工作区未暂存差异；staged=true 看暂存区差异；stat=true 只看文件级统计\n   · 审查未提交改动、生成提交信息时优先用它，不要用 run_command 手写 git diff"),
+
+            new ToolDescriptor("git_log", "查看最近提交（oneline）", "{\"limit\":{\"type\":\"integer\",\"description\":\"默认 20，最大 100\"},\"path\":{\"type\":\"string\"}}", "[]", ToolDispatch.Local, false, ApprovalCatalog.Read, 33,
+                "提交历史：{\"tool\":\"git_log\",\"limit\":10} 或 {\"tool\":\"git_log\",\"path\":\"src/App.tsx\"}\n   · 用来看最近改了什么、提交信息风格与相关文件历史"),
+
+            new ToolDescriptor("git_show", "查看某个提交的详情与改动", "{\"rev\":{\"type\":\"string\",\"description\":\"HEAD / HEAD~1 / 分支名 / 提交哈希\"},\"stat\":{\"type\":\"string\",\"description\":\"填 true 只看统计\"}}", "[\"rev\"]", ToolDispatch.Local, false, ApprovalCatalog.Read, 34,
+                "查看提交：{\"tool\":\"git_show\",\"rev\":\"HEAD\"} 或 {\"tool\":\"git_show\",\"rev\":\"HEAD~1\",\"stat\":\"true\"}\n   · 默认输出完整补丁；stat=true 只看统计；rev 不允许以 - 开头"),
+
+            new ToolDescriptor("git_stage", "暂存 git 改动（需审批）", "{\"paths\":{\"type\":\"string\",\"description\":\"多个相对路径，用换行或分号分隔\"},\"all\":{\"type\":\"string\",\"description\":\"填 true 暂存全部改动\"}}", "[]", ToolDispatch.External, true, ApprovalCatalog.Command, 35,
+                "暂存改动：{\"tool\":\"git_stage\",\"paths\":\"src/App.tsx\\nsrc/theme.ts\"} 或 {\"tool\":\"git_stage\",\"all\":\"true\"}\n   · 敏感文件会被拒绝暂存；暂存后可用 git_diff(staged=true) 复核；确认无误后再 git_commit"),
+
+            new ToolDescriptor("git_commit", "提交已暂存改动（需审批；不会 push）", "{\"message\":{\"type\":\"string\",\"description\":\"提交信息，遵循 Conventional Commits\"},\"add_all\":{\"type\":\"string\",\"description\":\"填 true 先暂存全部改动再提交\"}}", "[\"message\"]", ToolDispatch.External, true, ApprovalCatalog.Command, 36,
+                "提交：{\"tool\":\"git_commit\",\"message\":\"feat: 登录页增加表单校验\"}\n   · 只提交已暂存内容；add_all=true 会先 git add -A；不会自动 push\n   · 提交前建议先 git_status + git_diff(staged=true) 复核，并在回答里说明提交哈希"),
         ];
 
         // 工具名 → 描述符（大小写不敏感；模型偶尔会改动大小写）

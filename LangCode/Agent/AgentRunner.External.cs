@@ -161,6 +161,20 @@ namespace LangCode.Agent
                         return new ToolResult { Ok = true, Output = text };
                     }
 
+                case "git_stage":
+                    return GitWorkspace.Stage(
+                        _workspace?.Root,
+                        action.Get("paths"),
+                        ParseBool(action.Get("all")),
+                        IsBlockedGitPath);
+
+                case "git_commit":
+                    return GitWorkspace.Commit(
+                        _workspace?.Root,
+                        action.Get("message"),
+                        ParseBool(action.Get("add_all")),
+                        IsBlockedGitPath);
+
                 default:
                     return new ToolResult { Ok = false, Output = "✗ 未知工具：" + action.Name };
             }
@@ -209,6 +223,22 @@ namespace LangCode.Agent
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Git 暂存 / 提交时的敏感文件守卫：默认拒绝把 .env、密钥、证书等推进版本库。
+        /// 工作区策略显式放开敏感文件时才允许。
+        /// </summary>
+        private bool IsBlockedGitPath(string relativePath)
+        {
+            if (_permission == null ||
+                !_permission.Workspace.BlockSensitiveFiles ||
+                _permission.Workspace.AllowSensitiveFiles)
+            {
+                return false;
+            }
+
+            return SensitiveFiles.IsSensitive(relativePath);
         }
 
         /// <summary>

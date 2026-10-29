@@ -141,6 +141,7 @@ namespace LangCode.Agent
                 {
                     applied++;
                     _editApplied = true;
+                    _editCount++;
                     callbacks.OnEditApplied?.Invoke(pending);
                     _index.Invalidate();
                 }
@@ -398,6 +399,7 @@ namespace LangCode.Agent
                 {
                     applied++;
                     _editApplied = true;
+                    _editCount++;
                     callbacks.OnEditApplied?.Invoke(pending);
                     _index.Invalidate();
                 }

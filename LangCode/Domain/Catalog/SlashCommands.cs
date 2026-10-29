@@ -68,13 +68,13 @@ namespace LangCode.Domain.Catalog
                 "review",
                 "审查改动",
                 "审查未提交的改动，按严重程度列出问题",
-                "审查当前工作区里未提交的改动，指出潜在 bug、边界条件与改进点，并按严重程度排序"),
+                "审查当前工作区里未提交的改动：先调用 git_status 和 git_diff（需要看暂存区时用 git_diff staged=true），必要时用 git_log / git_show 了解上下文；指出潜在 bug、边界条件与改进点，并按严重程度排序。不要用 run_command 手写 git diff"),
 
             new SlashCommand(
                 "commit",
-                "生成提交信息",
-                "按 Conventional Commits 生成提交信息",
-                "检查当前未提交的改动，按 Conventional Commits 生成提交信息，并列出本次将纳入提交的文件"),
+                "生成并执行提交",
+                "按 Conventional Commits 生成提交信息，确认后暂存并提交",
+                "检查当前未提交的改动：先调用 git_status 和 git_diff 复核，按 Conventional Commits 生成一条清晰的提交信息，并列出本次将纳入提交的文件；我确认后，依次调用 git_stage 和 git_commit 完成暂存与提交（不要用 run_command 执行 git commit，也不要 push）"),
 
             new SlashCommand(
                 "test",
